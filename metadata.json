@@ -1,0 +1,6 @@
+{
+  "name": "POV Shared Photo Album",
+  "description": "A full-stack shared wedding and party photo album application. Hosts can create custom events, generate QR codes, specify save directories to sync to localhost, and configure upload limits. Guests can capture/upload photos with aesthetic retro filters and record 30-second videos.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
