@@ -1,6 +1,8 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import https from "https";
+import http from "http";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
 import multer from "multer";
@@ -45,11 +47,11 @@ async function setupAdmin() {
   
   const admin = await sqlite.get('SELECT * FROM admins WHERE username = ?', username);
   if (!admin) {
-    await sqlite.run('INSERT INTO admins (id, username, passwordHash) VALUES (?, ?, ?)', uuidv4(), username, hash);
-    logger.info(`Admin created. Login with username: ${username}`);
+    await sqlite.run('INSERT INTO admins (id, username, passwordHash, isSuperuser) VALUES (?, ?, ?, 1)', uuidv4(), username, hash);
+    logger.info(`Superuser admin created. Login with username: ${username}`);
   } else {
     // Sync password from environment variable
-    await sqlite.run('UPDATE admins SET passwordHash = ? WHERE username = ?', hash, username);
+    await sqlite.run('UPDATE admins SET passwordHash = ?, isSuperuser = 1 WHERE username = ?', hash, username);
   }
 }
 
@@ -140,7 +142,14 @@ const requireAdmin = (req: any, res: any, next: any) => {
 
 app.use("/uploads", express.static(uploadsBaseDir));
 
-const storage = multer.memoryStorage();
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsBaseDir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `temp-${Date.now()}-${uuidv4()}`);
+  }
+});
 const uploadParams = multer({
   storage,
   limits: { fileSize: 200 * 1024 * 1024 },
@@ -160,7 +169,7 @@ app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 app.get("/api/admin/check", (req: any, res) => {
   if (req.session && req.session.adminId) {
-    res.json({ authenticated: true });
+    res.json({ authenticated: true, isSuperuser: req.session.isSuperuser, adminId: req.session.adminId });
   } else {
     res.status(401).json({ authenticated: false });
   }
@@ -172,7 +181,8 @@ app.post("/api/admin/login", loginLimiter, async (req: any, res) => {
   const admin = await sqlite.get('SELECT * FROM admins WHERE username = ?', username);
   if (admin && await bcrypt.compare(password, admin.passwordHash)) {
     req.session.adminId = admin.id;
-    res.json({ success: true, message: 'Logged in' });
+    req.session.isSuperuser = admin.isSuperuser === 1 || admin.isSuperuser === true || admin.isSuperuser === 'true';
+    res.json({ success: true, message: 'Logged in', isSuperuser: req.session.isSuperuser });
   } else {
     res.status(401).json({ error: 'Invalid credentials' });
   }
@@ -205,6 +215,12 @@ app.post("/api/events", requireAdmin, async (req, res, next) => {
     
     const cleanedId = id.trim().toLowerCase().replace(/[^a-z0-9\-]/g, "");
     
+    // Check ownership if updating
+    const existingEvent = await db.getEventById(cleanedId);
+    if (existingEvent && existingEvent.adminId && existingEvent.adminId !== req.session.adminId && !req.session.isSuperuser) {
+      return res.status(403).json({ error: "Forbidden: You cannot modify an event that belongs to another admin" });
+    }
+
     await db.createOrUpdateEvent({
       id: cleanedId, name, hostName, description, 
       date: date || new Date().toISOString().split('T')[0],
@@ -215,7 +231,8 @@ app.post("/api/events", requireAdmin, async (req, res, next) => {
       maxVideoDuration: parseInt(maxVideoDuration)||30,
       saveDirectory: saveDirectory || './uploads',
       localSyncHost: "http://localhost:8080",
-      localSyncEnabled: false
+      localSyncEnabled: false,
+      adminId: existingEvent?.adminId || req.session.adminId
     });
     
     const event = await db.getEventById(cleanedId);
@@ -227,6 +244,10 @@ app.put("/api/events/:id/sync-settings", requireAdmin, async (req, res, next) =>
   try {
     const event = await db.getEventById(req.params.id);
     if (!event) return res.status(404).json({ error: "Event not found" });
+
+    if (event.adminId && event.adminId !== req.session.adminId && !req.session.isSuperuser) {
+      return res.status(403).json({ error: "Forbidden: You do not own this event" });
+    }
 
     const allowedFields = ['localSyncHost', 'localSyncEnabled', 'saveDirectory', 'isRevealed'];
     const updates: any = { id: event.id };
@@ -244,6 +265,10 @@ app.put("/api/events/:id/sync-settings", requireAdmin, async (req, res, next) =>
 // Used to be public in previous commit, securing it
 app.delete("/api/events/:id", requireAdmin, async (req, res, next) => {
   try {
+    const event = await db.getEventById(req.params.id);
+    if (event && event.adminId && event.adminId !== req.session.adminId && !req.session.isSuperuser) {
+      return res.status(403).json({ error: "Forbidden: You do not own this event" });
+    }
     await db.deleteEvent(req.params.id);
     await storageProvider.deleteEventData(req.params.id);
     res.json({ success: true });
@@ -283,12 +308,18 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
     const duration = parseInt(req.body.duration) || 0;
 
     if (type === 'photo' && req.file.size > 20 * 1024 * 1024) {
+      if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
       return res.status(400).json({ error: "Photo exceeds 20MB limit." });
     }
 
     const { url: publicUrl, systemSavePath } = await storageProvider.saveFile(
-        req.file, eventId, type, req.file.originalname, req.file.buffer
+        req.file, eventId, type, req.file.originalname
     );
+
+    // Clean up temp file if storageProvider didn't move it
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
 
     const mediaItem = {
       id: uuidv4(),
@@ -405,9 +436,30 @@ async function startServer() {
     }
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
-    logger.info(`>>> Full-Stack Express Server active on: http://localhost:${PORT} <<<`);
-  });
+  const hasCerts = fs.existsSync(path.join(process.cwd(), 'privkey.pem')) && fs.existsSync(path.join(process.cwd(), 'fullchain.pem'));
+
+  if (hasCerts) {
+    const privateKey = fs.readFileSync(path.join(process.cwd(), 'privkey.pem'), 'utf8');
+    const certificate = fs.readFileSync(path.join(process.cwd(), 'fullchain.pem'), 'utf8');
+    const credentials = { key: privateKey, cert: certificate };
+
+    const httpsServer = https.createServer(credentials, app);
+    httpsServer.listen(443, "0.0.0.0", () => {
+      logger.info(`>>> HTTPS Server active on port 443 <<<`);
+    });
+
+    const httpApp = express();
+    httpApp.get('*', (req, res) => {
+      res.redirect('https://' + req.headers.host + req.url);
+    });
+    httpApp.listen(80, "0.0.0.0", () => {
+      logger.info(`>>> HTTP Redirect Server active on port 80 <<<`);
+    });
+  } else {
+    app.listen(PORT, "0.0.0.0", () => {
+      logger.info(`>>> Full-Stack Express Server active on: http://localhost:${PORT} <<<`);
+    });
+  }
 }
 
 startServer();

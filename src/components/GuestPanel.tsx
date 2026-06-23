@@ -22,6 +22,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   // Guest registration state
   const [guestName, setGuestName] = useState("");
   const [isRegistered, setIsRegistered] = useState(false);
+  const [showInvitation, setShowInvitation] = useState(true);
 
   // Active filter
   const [selectedFilter, setSelectedFilter] = useState<FilterPreset>(FILM_FILTERS[0]);
@@ -519,36 +520,52 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   const handleDeleteMedia = async (mediaId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!window.confirm("آیا از حذف این فایل مطمئن هستید؟ (فقط مجاز به حذف فایل‌های خودتان هستید)")) return;
+    
+    // Optimistic UI Update
+    const itemToDelete = mediaItems.find(m => m.id === mediaId);
+    if (!itemToDelete) return;
+
+    setMediaItems(prev => prev.filter(m => m.id !== mediaId));
+    if (itemToDelete.type === "photo") {
+      setSnappedCount(p => Math.max(0, p - 1));
+    } else {
+      setVideoCount(v => Math.max(0, v - 1));
+    }
+
     try {
       const res = await fetch(`/api/events/${eventId}/media/${mediaId}`, { 
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ guestName })
       });
-      if (res.ok) {
-        setMediaItems(prev => prev.filter(m => m.id !== mediaId));
-        const deletedItem = mediaItems.find(m => m.id === mediaId);
-        if (deletedItem) {
-          if (deletedItem.type === "photo") {
-            setSnappedCount(p => {
-              const np = Math.max(0, p - 1);
-              localStorage.setItem(`snapped_${eventId}`, np.toString());
-              return np;
-            });
-          } else {
-            setVideoCount(v => {
-              const nv = Math.max(0, v - 1);
-              localStorage.setItem(`video_${eventId}`, nv.toString());
-              return nv;
-            });
-          }
-        }
-      } else {
-        alert("خطا در حذف فایل یا عدم دسترسی.");
+      if (!res.ok) {
+        throw new Error(await res.text());
       }
-    } catch (err) {
+      
+      // Update local storage on true success
+      if (itemToDelete.type === "photo") {
+        setSnappedCount(p => { localStorage.setItem(`snapped_${eventId}`, p.toString()); return p; });
+      } else {
+        setVideoCount(v => { localStorage.setItem(`video_${eventId}`, v.toString()); return v; });
+      }
+    } catch (err: any) {
       console.error(err);
-      alert("خطای شبکه");
+      alert("خطا در حذف فایل یا عدم دسترسی: " + err.message);
+      
+      // Rollback
+      setMediaItems(prev => {
+        if (!prev.find(m => m.id === mediaId)) {
+          const restored = [...prev, itemToDelete];
+          restored.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          return restored;
+        }
+        return prev;
+      });
+      if (itemToDelete.type === "photo") {
+        setSnappedCount(p => p + 1);
+      } else {
+        setVideoCount(v => v + 1);
+      }
     }
   };
 
@@ -597,6 +614,30 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
             className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2 px-6 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1"
           >
             بازگشت
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (showInvitation) {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col bg-black">
+        <div className="flex-1 w-full h-full relative">
+          <iframe 
+            src="https://canva.link/kyqn7u6wjqmp4uq" 
+            className="w-full h-full border-none"
+            title="Event Invitation"
+            allowFullScreen
+          ></iframe>
+        </div>
+        <div className="absolute bottom-6 left-0 right-0 flex justify-center z-10 px-4 pointer-events-none">
+          <button
+            onClick={() => setShowInvitation(false)}
+            className="pointer-events-auto bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold py-4 px-8 rounded-full shadow-2xl transition-all cursor-pointer flex items-center gap-2 transform hover:scale-105 active:scale-95"
+          >
+            <Camera className="w-5 h-5" />
+            <span>ورود به دوربین / پنل</span>
           </button>
         </div>
       </div>

@@ -33,7 +33,8 @@ export async function initDb(): Promise<Database> {
       saveDirectory TEXT,
       localSyncHost TEXT,
       localSyncEnabled BOOLEAN,
-      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+      adminId TEXT
     );
 
     CREATE TABLE IF NOT EXISTS media (
@@ -58,9 +59,23 @@ export async function initDb(): Promise<Database> {
     CREATE TABLE IF NOT EXISTS admins (
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
-      passwordHash TEXT NOT NULL
+      passwordHash TEXT NOT NULL,
+      isSuperuser BOOLEAN DEFAULT 0
     );
   `);
+
+  try {
+    const tableInfo = await dbInstance.all("PRAGMA table_info(events)");
+    if (!tableInfo.find(c => c.name === 'adminId')) {
+      await dbInstance.exec('ALTER TABLE events ADD COLUMN adminId TEXT;');
+    }
+  } catch (e) {}
+  try {
+    const tableInfo = await dbInstance.all("PRAGMA table_info(admins)");
+    if (!tableInfo.find(c => c.name === 'isSuperuser')) {
+      await dbInstance.exec('ALTER TABLE admins ADD COLUMN isSuperuser BOOLEAN DEFAULT 0;');
+    }
+  } catch (e) {}
 
   return dbInstance;
 }
@@ -136,7 +151,7 @@ export async function getEventById(id: string) {
 export async function createOrUpdateEvent(eventData: any) {
   const db = await getDb();
   
-  const ALLOWED_EVENT_FIELDS = ['id', 'name', 'hostName', 'description', 'date', 'revealStyle', 'isRevealed', 'imageLimit', 'videoLimit', 'maxVideoDuration', 'saveDirectory', 'localSyncHost', 'localSyncEnabled', 'createdAt'];
+  const ALLOWED_EVENT_FIELDS = ['id', 'name', 'hostName', 'description', 'date', 'revealStyle', 'isRevealed', 'imageLimit', 'videoLimit', 'maxVideoDuration', 'saveDirectory', 'localSyncHost', 'localSyncEnabled', 'createdAt', 'adminId'];
   const cleanData: any = {};
   for (const field of ALLOWED_EVENT_FIELDS) {
     if (eventData[field] !== undefined) {

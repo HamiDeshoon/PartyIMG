@@ -1,6 +1,9 @@
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import mime from "mime-types";
+import { Readable } from "stream";
 
 export interface StorageProvider {
   init(): Promise<void>;
@@ -66,8 +69,32 @@ export class LocalStorageProvider implements StorageProvider {
 }
 
 export class R2StorageProvider implements StorageProvider {
+  private s3: S3Client;
+  private bucketName: string;
+  private publicDomain: string;
+
+  constructor() {
+    const accountId = process.env.R2_ACCOUNT_ID;
+    const accessKeyId = process.env.R2_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+    this.bucketName = process.env.R2_BUCKET_NAME || 'partyimg-uploads';
+    this.publicDomain = process.env.R2_PUBLIC_DOMAIN || ''; // Required to serve images publically
+    
+    // In dev we might not have them but we should provide dummy values so it doesn't crash on boot if USE_R2 is false
+    this.s3 = new S3Client({
+      region: "auto",
+      endpoint: `https://${accountId || 'dummy'}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: accessKeyId || 'dummy',
+        secretAccessKey: secretAccessKey || 'dummy',
+      },
+    });
+  }
+
   async init() {
-    // Cloudflare R2 bucket binding initialization handled by environment/workerd
+    if (process.env.USE_R2 === "true" && (!process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID)) {
+      console.warn("WARNING: R2 credentials missing. Ensure R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY are set.");
+    }
     console.log("R2 Storage initialized.");
   }
 
@@ -77,24 +104,74 @@ export class R2StorageProvider implements StorageProvider {
     const filename = `media-${Date.now()}-${uuidv4()}${ext}`;
     const key = `${eventId}/${typeFolder}/${filename}`;
     
-    // In actual implementation, we would use env.R2_BUCKET.put(key, buffer)
-    // Stubbing for abstract interface
-    
-    const publicUrl = `/r2-uploads/${key}`;
+    let uploadBody: Buffer | Readable;
+    if (buffer) {
+       uploadBody = buffer;
+    } else if (file && file.path) {
+       uploadBody = fs.createReadStream(file.path);
+    } else {
+       throw new Error("No buffer or file path provided to R2StorageProvider");
+    }
+
+    const command = new PutObjectCommand({
+      Bucket: this.bucketName,
+      Key: key,
+      Body: uploadBody,
+      ContentType: mime.lookup(originalName) || 'application/octet-stream',
+    });
+
+    await this.s3.send(command);
+
+    const publicUrl = this.publicDomain ? `${this.publicDomain}/${key}` : `/uploads/${key}`; // fallback to proxy endpoint if no domain
     return { url: publicUrl, systemSavePath: key };
   }
 
   async deleteFile(url: string, systemSavePath: string, eventId: string, type: string): Promise<void> {
-     // env.R2_BUCKET.delete(systemSavePath);
+    const command = new DeleteObjectCommand({
+      Bucket: this.bucketName,
+      Key: systemSavePath,
+    });
+    await this.s3.send(command);
   }
 
-  getFileStream(systemSavePath: string) {
-    // env.R2_BUCKET.get(systemSavePath) stream
-    return null;
+  async getFileStream(systemSavePath: string) {
+    const command = new GetObjectCommand({
+      Bucket: this.bucketName,
+      Key: systemSavePath,
+    });
+    const response = await this.s3.send(command);
+    return response.Body as Readable;
   }
 
   async deleteEventData(eventId: string): Promise<void> {
-    // List and delete all keys starting with eventId/
+    let isTruncated = true;
+    let continuationToken: string | undefined = undefined;
+
+    while (isTruncated) {
+      const listCommand = new ListObjectsV2Command({
+        Bucket: this.bucketName,
+        Prefix: `${eventId}/`,
+        ContinuationToken: continuationToken,
+      });
+
+      const listResponse = await this.s3.send(listCommand);
+
+      if (listResponse.Contents && listResponse.Contents.length > 0) {
+        // Delete objects one by one (or could use DeleteObjectsCommand for bulk)
+        for (const object of listResponse.Contents) {
+          if (object.Key) {
+             const deleteCommand = new DeleteObjectCommand({
+               Bucket: this.bucketName,
+               Key: object.Key,
+             });
+             await this.s3.send(deleteCommand);
+          }
+        }
+      }
+
+      isTruncated = listResponse.IsTruncated || false;
+      continuationToken = listResponse.NextContinuationToken;
+    }
   }
 }
 
