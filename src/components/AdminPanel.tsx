@@ -332,29 +332,54 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     if (!confirm("Are you absolutely sure you want to delete this event? This will wipe all uploaded photos and videos in the sandbox.")) {
       return;
     }
+    
+    // Optimistic UI update
+    const eventToDelete = events.find(e => e.id === id);
+    setEvents(prev => prev.filter(e => e.id !== id));
+    if (selectedEventId === id) setSelectedEventId(null);
+
     try {
-      await fetch(`/api/events/${id}`, { method: "DELETE" });
-      setSelectedEventId(null);
-      await fetchEvents();
-    } catch (err) {
+      const res = await fetch(`/api/events/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+    } catch (err: any) {
       console.error(err);
+      alert("Error deleting event: " + err.message);
+      // Rollback
+      if (eventToDelete) {
+        setEvents(prev => [...prev, eventToDelete]);
+        if (selectedEventId === null) setSelectedEventId(id);
+      }
     }
   };
 
   const handleDeleteMedia = async (mediaId: string) => {
     if (!selectedEventId) return;
     if (!window.confirm("آیا از حذف این فایل مطمئن هستید؟ (این عمل غیرقابل برگشت است)")) return;
+    
+    // Optimistic UI update
+    const mediaToDelete = mediaItems.find(m => m.id === mediaId);
+    setMediaItems(prev => prev.filter(m => m.id !== mediaId));
+
     try {
       const res = await fetch(`/api/events/${selectedEventId}/media/${mediaId}`, { 
         method: "DELETE" 
       });
-      if (res.ok) {
-        setMediaItems(prev => prev.filter(m => m.id !== mediaId));
-      } else {
-        alert("خطا در حذف فایل");
+      if (!res.ok) {
+        throw new Error(await res.text());
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert("خطا در حذف فایل: " + err.message);
+      // Rollback
+      if (mediaToDelete) {
+        setMediaItems(prev => {
+          const restored = [...prev, mediaToDelete];
+          restored.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+          return restored;
+        });
+      }
     }
   };
 
