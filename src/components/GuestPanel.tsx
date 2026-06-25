@@ -4,6 +4,7 @@ import {
   Lock, Unlock, RotateCw, Play, Square, Check, AlertCircle, Loader, ArrowLeft, Trash2, WifiOff
 } from "lucide-react";
 import { FILM_FILTERS, FilterPreset } from "../types";
+import { toast } from "sonner";
 
 interface GuestPanelProps {
   eventId: string;
@@ -88,6 +89,12 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   // Full screen light-box
   const [activeLightboxIndex, setActiveLightboxIndex] = useState<number | null>(null);
 
+  // Pagination states
+  const [mediaOffset, setMediaOffset] = useState(0);
+  const [hasMoreMedia, setHasMoreMedia] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const MEDIA_LIMIT = 24;
+
   // Read event configuration & registration
   const loadEventAndMedia = async () => {
     try {
@@ -103,22 +110,48 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
       setEventInfo(evData);
 
       // Fetch media
-      const mediaRes = await fetch(`/api/events/${eventId}/media`);
+      const mediaRes = await fetch(`/api/events/${eventId}/media?limit=${MEDIA_LIMIT}&offset=0`);
       const mediaData = await mediaRes.json();
       setLockedFeed(mediaData.locked || false);
-      setMediaItems(mediaData.media || []);
+      const fetchedMedia = mediaData.media || [];
+      setMediaItems(fetchedMedia);
+      
+      setMediaOffset(fetchedMedia.length);
+      setHasMoreMedia(fetchedMedia.length === MEDIA_LIMIT);
 
       // Filter limits for guest
       const storedName = localStorage.getItem(`guest_name_${eventId}`);
       if (storedName) {
         setGuestName(storedName);
         setIsRegistered(true);
-        calculateGuestLimits(storedName, mediaData.media || []);
+        calculateGuestLimits(storedName, fetchedMedia);
       }
     } catch (e) {
       console.error("Failed to load guest room detail.", e);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreMedia = async () => {
+    if (isLoadingMore || !hasMoreMedia) return;
+    try {
+      setIsLoadingMore(true);
+      const mediaRes = await fetch(`/api/events/${eventId}/media?limit=${MEDIA_LIMIT}&offset=${mediaOffset}`);
+      const mediaData = await mediaRes.json();
+      const newMedia = mediaData.media || [];
+      
+      if (newMedia.length > 0) {
+        setMediaItems(prev => [...prev, ...newMedia]);
+        setMediaOffset(prev => prev + newMedia.length);
+      }
+      if (newMedia.length < MEDIA_LIMIT) {
+        setHasMoreMedia(false);
+      }
+    } catch (e) {
+      console.error("Failed to load more media.", e);
+    } finally {
+      setIsLoadingMore(false);
     }
   };
 
@@ -297,7 +330,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
       try {
         mediaRecorder = new MediaRecorder(stream);
       } catch (err: any) {
-        alert("Video recording formats not supported on this mobile user agent.");
+        toast.error("Video recording formats not supported on this mobile user agent.");
         return;
       }
     }
@@ -364,7 +397,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
     // Check size limits
     if (files.some(f => f.size > 30 * 1024 * 1024)) {
-      alert("حجم یکی از فایل‌های انتخاب شده از سقف ۳۰ مگابایت بیشتر است.");
+      toast.error("حجم یکی از فایل‌های انتخاب شده از سقف ۳۰ مگابایت بیشتر است.");
       return;
     }
 
@@ -483,7 +516,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
       if (!res.ok) {
         const errorData = await res.json();
-        alert(errorData.error || "از سقف مجاز ثبت فایل عبور کرده‌اید.");
+        toast.error(errorData.error || "از سقف مجاز ثبت فایل عبور کرده‌اید.");
         return false;
       }
 
@@ -512,7 +545,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
       return true;
     } catch (err) {
       console.error(err);
-      alert("Submission dropped. Network failed.");
+      toast.error("Submission dropped. Network failed.");
       return false;
     }
   };
@@ -550,7 +583,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
       }
     } catch (err: any) {
       console.error(err);
-      alert("خطا در حذف فایل یا عدم دسترسی: " + err.message);
+      toast.error("خطا در حذف فایل یا عدم دسترسی: " + err.message);
       
       // Rollback
       setMediaItems(prev => {
@@ -1121,13 +1154,14 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                     <p className="text-[10px] text-slate-450 mt-0.5 font-sans">اولین عکاس مراسم باشید و لحظه‌ها را ثبت کنید!</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3" id="guest_photos_grid">
-                    {mediaItems.map((m, idx) => (
-                      <div
-                        key={m.id}
-                        onClick={() => setActiveLightboxIndex(idx)}
-                        className="backdrop-blur-md bg-white/5 rounded-2xl overflow-hidden cursor-pointer border border-white/10 hover:border-pink-500/30 hover:scale-[1.01] transition-all duration-200 group flex flex-col justify-between shadow-lg"
-                      >
+                  <>
+                    <div className="grid grid-cols-2 gap-3" id="guest_photos_grid">
+                      {mediaItems.map((m, idx) => (
+                        <div
+                          key={m.id}
+                          onClick={() => setActiveLightboxIndex(idx)}
+                          className="backdrop-blur-md bg-white/5 rounded-2xl overflow-hidden cursor-pointer border border-white/10 hover:border-pink-500/30 hover:scale-[1.01] transition-all duration-200 group flex flex-col justify-between shadow-lg"
+                        >
                         {/* Display media */}
                         <div className="relative aspect-square bg-black/60 overflow-hidden flex items-center justify-center select-none">
                           {m.type === "video" ? (
@@ -1146,10 +1180,11 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                             </div>
                           ) : (
                             <img
-                              src={m.url}
+                              src={m.thumbnailUrl || m.url}
                               alt={`Submited by ${m.guestName}`}
                               className="w-full h-full object-cover"
                               referrerPolicy="no-referrer"
+                              loading="lazy"
                             />
                           )}
 
@@ -1195,6 +1230,26 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                       </div>
                     ))}
                   </div>
+                  
+                  {hasMoreMedia && mediaItems.length > 0 && (
+                    <div className="pt-8 pb-4 flex justify-center">
+                      <button
+                        onClick={loadMoreMedia}
+                        disabled={isLoadingMore}
+                        className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 py-2.5 rounded-full text-xs font-semibold text-slate-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                      >
+                        {isLoadingMore ? (
+                          <>
+                            <Loader className="w-4 h-4 animate-spin" />
+                            در حال بارگذاری...
+                          </>
+                        ) : (
+                          "بارگذاری تصاویر بیشتر"
+                        )}
+                      </button>
+                    </div>
+                  )}
+                  </>
                 )}
               </div>
             )}

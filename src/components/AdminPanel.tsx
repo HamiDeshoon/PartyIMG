@@ -7,6 +7,7 @@ import {
 import { EventConfig, FILM_FILTERS } from "../types";
 import QRCode from "qrcode";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { toast } from "sonner";
 
 interface AdminPanelProps {
   onBackToHome: () => void;
@@ -239,7 +240,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       let active = true;
       const poll = async () => {
         try {
-          const res = await fetch(`/api/events/${selectedEventId}/media?isAdmin=true`);
+          const res = await fetch(`/api/events/${selectedEventId}/media?isAdmin=true&limit=1000`);
           if (res.ok && active) {
             const data = await res.json();
             setMediaItems(data.media || []);
@@ -258,7 +259,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   // Fetch media for specific event
   const fetchMedia = async (id: string) => {
     try {
-      const res = await fetch(`/api/events/${id}/media?isAdmin=true`);
+      const res = await fetch(`/api/events/${id}/media?isAdmin=true&limit=1000`);
       const data = await res.json();
       setMediaItems(data.media || []);
     } catch (e) {
@@ -269,7 +270,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const handleCreateEvent = async (e: FormEvent) => {
     e.preventDefault();
     if (!formId || !formName) {
-      alert("Please provide an Event Code and Event Name.");
+      toast.error("Please provide an Event Code and Event Name.");
       return;
     }
 
@@ -291,7 +292,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
 
       if (!res.ok) {
         const err = await res.json();
-        alert(err.error || "Failed to save event");
+        toast.error(err.error || "Failed to save event");
         return;
       }
 
@@ -308,7 +309,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       setFormVidLimit(3);
     } catch (err) {
       console.error(err);
-      alert("Connection error when saving event.");
+      toast.error("Connection error when saving event.");
     }
   };
 
@@ -345,7 +346,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       }
     } catch (err: any) {
       console.error(err);
-      alert("Error deleting event: " + err.message);
+      toast.error("Error deleting event: " + err.message);
       // Rollback
       if (eventToDelete) {
         setEvents(prev => [...prev, eventToDelete]);
@@ -371,7 +372,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       }
     } catch (err: any) {
       console.error(err);
-      alert("خطا در حذف فایل: " + err.message);
+      toast.error("خطا در حذف فایل: " + err.message);
       // Rollback
       if (mediaToDelete) {
         setMediaItems(prev => {
@@ -417,7 +418,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         console.error("Error sharing", err);
       }
     } else {
-      alert("مرورگر شما از قابلیت اشتراک‌گذاری بومی پشتیبانی نمی‌کند.");
+      toast.error("مرورگر شما از قابلیت اشتراک‌گذاری بومی پشتیبانی نمی‌کند.");
     }
   };
 
@@ -637,7 +638,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const printPostalCard = () => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      alert("Popup blocker prevented physical print template! Please allow popups for this site so the system can launch standard physical printing output.");
+      toast.error("Popup blocker prevented physical print template! Please allow popups for this site so the system can launch standard physical printing output.");
       return;
     }
 
@@ -1201,10 +1202,11 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                             </div>
                           ) : (
                             <img
-                              src={m.url}
+                              src={m.thumbnailUrl || m.url}
                               alt={`Snapped by ${m.guestName}`}
                               className="w-full h-full object-cover"
                               referrerPolicy="no-referrer"
+                              loading="lazy"
                             />
                           )}
 

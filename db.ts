@@ -183,9 +183,9 @@ export async function deleteEvent(id: string) {
   await db.run('DELETE FROM events WHERE id = ?', id);
 }
 
-export async function getEventMedia(eventId: string) {
+export async function getEventMedia(eventId: string, limit: number = 50, offset: number = 0) {
   const db = await getDb();
-  return await db.all('SELECT * FROM media WHERE eventId = ? ORDER BY timestamp DESC', eventId);
+  return await db.all('SELECT * FROM media WHERE eventId = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?', [eventId, limit, offset]);
 }
 
 export async function createMedia(mediaItem: any) {

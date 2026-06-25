@@ -2,6 +2,8 @@ import { useState, useEffect, FormEvent, lazy, Suspense } from "react";
 import { Camera, Settings, Plus, ArrowRight, Sparkles, Folder, Heart, Video } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
+import { Toaster } from "sonner";
+
 const AdminPanel = lazy(() => import("./components/AdminPanel"));
 const GuestPanel = lazy(() => import("./components/GuestPanel"));
 
@@ -80,6 +82,7 @@ export default function App() {
 
   return (
     <div className="font-sans min-h-screen bg-[#2a1c22] text-slate-150 flex flex-col relative overflow-hidden select-none" id="app_frame" dir="rtl">
+      <Toaster position="top-center" theme="dark" richColors />
       
       {/* Frosted Glass Background Orbs */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">

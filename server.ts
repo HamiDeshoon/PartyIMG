@@ -17,6 +17,13 @@ import * as db from "./db.js";
 import { logger } from "./logger.js";
 import { getStorageProvider } from "./storage.js";
 
+declare module 'express-session' {
+  interface SessionData {
+    adminId: string;
+    isSuperuser: boolean;
+  }
+}
+
 function validateEnv() {
   if (process.env.NODE_ENV === "production") {
     if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
@@ -140,7 +147,7 @@ const requireAdmin = (req: any, res: any, next: any) => {
   }
 };
 
-app.use("/uploads", express.static(uploadsBaseDir));
+app.use("/uploads", express.static(uploadsBaseDir, { maxAge: "30d" }));
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -281,10 +288,14 @@ app.get("/api/events/:id/media", async (req: any, res: any, next: any) => {
     if (!event) return res.status(404).json({ error: "Event not found" });
 
     const isAdmin = req.session && req.session.adminId;
-    const eventMedias = await db.getEventMedia(event.id);
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+    
+    // We update db.getEventMedia below to support pagination
+    const eventMedias = await db.getEventMedia(event.id, limit, offset);
 
     if (!event.isRevealed && !isAdmin && event.revealStyle === "delay") {
-      const secureMedia = eventMedias.map(m => ({
+      const secureMedia = eventMedias.map((m: any) => ({
         id: m.id, eventId: m.eventId, type: m.type, guestName: m.guestName, timestamp: m.timestamp, filter: m.filter, isLocked: true
       }));
       return res.json({ locked: true, media: secureMedia });
@@ -294,6 +305,8 @@ app.get("/api/events/:id/media", async (req: any, res: any, next: any) => {
 });
 
 // Multipart streaming upload
+import sharp from "sharp";
+
 app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), async (req, res, next) => {
   try {
     const eventId = req.params.id;
@@ -312,9 +325,28 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
       return res.status(400).json({ error: "Photo exceeds 20MB limit." });
     }
 
+    let thumbnailUrl;
+    if (type === 'photo') {
+      try {
+        const thumbBuffer = await sharp(req.file.path)
+          .resize({ width: 600, withoutEnlargement: true })
+          .webp({ quality: 80 })
+          .toBuffer();
+          
+        const thumbSave = await storageProvider.saveFile(
+            null, eventId, type, `thumb-${req.file.originalname}.webp`, thumbBuffer
+        );
+        thumbnailUrl = thumbSave.url;
+      } catch (err) {
+        logger.error("Failed to generate thumbnail: " + err);
+      }
+    }
+
     const { url: publicUrl, systemSavePath } = await storageProvider.saveFile(
         req.file, eventId, type, req.file.originalname
     );
+
+    if (!thumbnailUrl) thumbnailUrl = publicUrl;
 
     // Clean up temp file if storageProvider didn't move it
     if (fs.existsSync(req.file.path)) {
@@ -326,6 +358,7 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
       eventId,
       type,
       url: publicUrl,
+      thumbnailUrl,
       guestName,
       filter,
       timestamp: new Date().toISOString(),
