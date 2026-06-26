@@ -11,6 +11,21 @@ interface GuestPanelProps {
   onBackToHome: () => void;
 }
 
+// Skeleton card component for media grid
+function MediaSkeletonCard() {
+  return (
+    <div className="backdrop-blur-md bg-white/5 rounded-2xl overflow-hidden border border-white/10 flex flex-col animate-pulse">
+      <div className="relative aspect-square bg-black/60">
+        <div className="absolute inset-0 bg-white/10"></div>
+      </div>
+      <div className="p-2.5 bg-black/45 border-t border-white/5">
+        <div className="h-3 w-24 bg-white/10 rounded mb-1.5"></div>
+        <div className="h-2 w-16 bg-white/10 rounded"></div>
+      </div>
+    </div>
+  );
+}
+
 export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   const [eventInfo, setEventInfo] = useState<any | null>(null);
   const [mediaItems, setMediaItems] = useState<any[]>([]);
@@ -1147,7 +1162,14 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                   <span className="text-[10px] font-mono text-slate-400">{mediaItems.length} فایل</span>
                 </div>
 
-                {mediaItems.length === 0 ? (
+                
+                {loading ? (
+                  <div className="grid grid-cols-2 gap-3" id="guest_photos_grid">
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <MediaSkeletonCard key={i} />
+                    ))}
+                  </div>
+                ) : mediaItems.length === 0 ? (
                   <div className="text-center py-16 text-slate-400 select-none border border-dashed border-white/10 rounded-2xl bg-white/5 backdrop-blur-md">
                     <Image className="w-8 h-8 text-pink-400/65 mx-auto stroke-1 mb-2" />
                     <p className="text-xs font-semibold text-slate-300 font-sans">آلبوم خالی است</p>

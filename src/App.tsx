@@ -13,10 +13,36 @@ interface AppRoute {
   guestEventId?: string;
 }
 
+// Skeleton loader component for event cards
+function EventCardSkeleton() {
+  return (
+    <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl flex flex-col space-y-5 animate-pulse">
+      <div className="space-y-1">
+        <div className="h-5 w-32 bg-white/20 rounded-lg"></div>
+      </div>
+      <div className="space-y-4 pt-2">
+        <div className="flex gap-2.5">
+          <div className="flex-1 h-12 bg-black/40 rounded-xl"></div>
+          <div className="h-12 w-20 bg-white/20 rounded-xl"></div>
+        </div>
+        <div className="pt-2">
+          <div className="h-3 w-24 bg-white/10 rounded mb-2"></div>
+          <div className="flex flex-wrap gap-1.5">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-7 w-16 bg-white/10 rounded-lg"></div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [route, setRoute] = useState<AppRoute>({ panel: "hub" });
   const [joinCode, setJoinCode] = useState("");
   const [sampleEvents, setSampleEvents] = useState<any[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
 
   // Monitor window URL hash updates
   const parseHashRoute = () => {
@@ -49,10 +75,12 @@ export default function App() {
     }
     
     // Fetch active directories/events to present as quick-joins
+    setEventsLoading(true);
     fetch("/api/events")
       .then(res => res.json())
       .then(data => setSampleEvents(data))
-      .catch(e => console.error(e));
+      .catch(e => console.error(e))
+      .finally(() => setEventsLoading(false));
 
     return () => {
       window.removeEventListener("hashchange", parseHashRoute);
@@ -174,67 +202,71 @@ export default function App() {
             <div className="w-full grid grid-cols-1 md:grid-cols-2 gap-6" id="hub_cards_grid">
               
               {/* Card 1: Guest join code */}
-              <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl flex flex-col space-y-5">
-                <div className="space-y-1">
-                  <h3 className="text-base font-medium text-white flex items-center gap-2">
-                    <span className="text-xl">📸</span> ورود به آلبوم
-                  </h3>
-                </div>
-
-                <form onSubmit={handleJoinByCode} className="space-y-4 pt-2">
-                  <div className="flex gap-2.5">
-                    <input
-                      type="text"
-                      required
-                      className="flex-1 bg-black/40 border border-white/15 rounded-xl py-3 px-4 focus:outline-hidden focus:ring-1 focus:ring-pink-500 focus:border-pink-500 text-white font-mono text-sm uppercase placeholder-slate-500 transition-all text-left"
-                      placeholder="کد رویداد"
-                      value={joinCode}
-                      onChange={(e) => setJoinCode(e.target.value)}
-                      dir="ltr"
-                    />
-                    <button
-                      type="submit"
-                      className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 active:scale-95 text-white font-semibold py-3 px-5 rounded-xl text-sm transition-all flex items-center justify-center cursor-pointer shadow-md shrink-0"
-                    >
-                      ورود
-                      <ArrowRight className="w-4 h-4 mr-2 rtl:-scale-x-100" />
-                    </button>
+              {eventsLoading ? (
+                <EventCardSkeleton />
+              ) : (
+                <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl flex flex-col space-y-5">
+                  <div className="space-y-1">
+                    <h3 className="text-base font-medium text-white flex items-center gap-2">
+                      <span className="text-xl">📸</span> ورود به آلبوم
+                    </h3>
                   </div>
 
-                  {sampleEvents.length > 0 && (
-                    <div className="pt-2">
-                      <p className="text-[10px] text-slate-400 font-semibold tracking-wider mb-1.5 flex items-center gap-1">رویدادهای فعال:</p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {sampleEvents.slice(0, 4).map(ev => (
-                          <button
-                            key={ev.id}
-                            onClick={() => navigateTo("guest", ev.id)}
-                            className={`border text-[10px] font-mono py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
-                              ev.id === 'test' 
-                                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-300' 
-                                : 'bg-white/5 hover:bg-white/15 border border-white/10 text-white'
-                            }`}
-                            dir="ltr"
-                          >
-                            #{ev.id}
-                          </button>
-                        ))}
-                      </div>
+                  <form onSubmit={handleJoinByCode} className="space-y-4 pt-2">
+                    <div className="flex gap-2.5">
+                      <input
+                        type="text"
+                        required
+                        className="flex-1 bg-black/40 border border-white/15 rounded-xl py-3 px-4 focus:outline-hidden focus:ring-1 focus:ring-pink-500 focus:border-pink-500 text-white font-mono text-sm uppercase placeholder-slate-500 transition-all text-left"
+                        placeholder="کد رویداد"
+                        value={joinCode}
+                        onChange={(e) => setJoinCode(e.target.value)}
+                        dir="ltr"
+                      />
+                      <button
+                        type="submit"
+                        className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 active:scale-95 text-white font-semibold py-3 px-5 rounded-xl text-sm transition-all flex items-center justify-center cursor-pointer shadow-md shrink-0"
+                      >
+                        ورود
+                        <ArrowRight className="w-4 h-4 mr-2 rtl:-scale-x-100" />
+                      </button>
                     </div>
-                  )}
 
-                  <div className="pt-3 border-t border-white/10">
-                    <button
-                      type="button"
-                      onClick={() => navigateTo("guest", "test")}
-                      className="w-full bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/35 hover:to-teal-600/35 border border-emerald-500/30 hover:border-emerald-400 text-emerald-300 hover:text-white font-medium py-2.5 px-4 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-inner"
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-                      ورود سریع به مراسم تست (Sandbox test)
-                    </button>
-                  </div>
-                </form>
-              </div>
+                    {sampleEvents.length > 0 && (
+                      <div className="pt-2">
+                        <p className="text-[10px] text-slate-400 font-semibold tracking-wider mb-1.5 flex items-center gap-1">رویدادهای فعال:</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {sampleEvents.slice(0, 4).map(ev => (
+                            <button
+                              key={ev.id}
+                              onClick={() => navigateTo("guest", ev.id)}
+                              className={`border text-[10px] font-mono py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
+                                ev.id === 'test' 
+                                  ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-300' 
+                                  : 'bg-white/5 hover:bg-white/15 border border-white/10 text-white'
+                              }`}
+                              dir="ltr"
+                            >
+                              #{ev.id}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-3 border-t border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => navigateTo("guest", "test")}
+                        className="w-full bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/35 hover:to-teal-600/35 border border-emerald-500/30 hover:border-emerald-400 text-emerald-300 hover:text-white font-medium py-2.5 px-4 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-inner"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+                        ورود سریع به مراسم تست (Sandbox test)
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              )}
 
               {/* Card 2: Host Admin Portal launcher */}
               <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl flex flex-col space-y-5">
