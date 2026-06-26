@@ -69,6 +69,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [cardTheme, setCardTheme] = useState<"slate" | "cream" | "neon" | "sage">("slate");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
   const [cardCustomImage, setCardCustomImage] = useState<string | null>(null);
+  const [customGuestAddress, setCustomGuestAddress] = useState("");
 
   const handleCardImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -141,7 +142,9 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   };
 
   const guestLink = selectedEventId 
-    ? `${window.location.origin}/#/guest/${selectedEventId}` 
+    ? (customGuestAddress.trim() 
+        ? `${window.location.origin.replace(/\/$/, '')}/${customGuestAddress.trim().replace(/^\/+/, '')}`
+        : `${window.location.origin}/#/guest/${selectedEventId}`)
     : "";
 
   const handleLogin = async (e: React.FormEvent) => {
