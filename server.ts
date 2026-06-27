@@ -62,16 +62,16 @@ async function setupAdmin() {
   }
 }
 
-// Seed a quick-join 'test' event for user demonstration and diagnostic purposes
-async function setupTestEvent() {
+// Seed the wedding event for quick-join
+async function setupWeddingEvent() {
   const sqlite = await db.getDb();
-  const testEvent = await sqlite.get('SELECT id FROM events WHERE id = ?', 'test');
-  if (!testEvent) {
+  const event = await sqlite.get('SELECT id FROM events WHERE id = ?', 'fatemeh-hamid');
+  if (!event) {
     await db.createOrUpdateEvent({
-      id: "test",
-      name: "مراسم تست مجلل (Test Event)",
-      hostName: "تیم توسعه PartyIMG",
-      description: "این مراسم برای تست آسان ویژگی‌های کاربری و فیلترهای نوستالژیک طراحی شده است.",
+      id: "fatemeh-hamid",
+      name: "مراسم عروسی فاطمه و حمید",
+      hostName: "فاطمه و حمید",
+      description: "به آلبوم دیجیتال ما خوش آمدید! لحظات زیبای خود را ثبت و با ما به اشتراک بگذارید.",
       date: new Date().toISOString().split('T')[0],
       revealStyle: "instant",
       isRevealed: true,
@@ -82,7 +82,7 @@ async function setupTestEvent() {
       localSyncHost: "http://localhost:8080",
       localSyncEnabled: false
     });
-    logger.info("Universal quick-join 'test' event has been provisioned.");
+    logger.info("Universal quick-join 'fatemeh-hamid' event has been provisioned.");
   }
 }
 
@@ -442,7 +442,7 @@ app.use((err: any, req: any, res: any, next: any) => {
 async function startServer() {
   await db.initDb();
   await setupAdmin();
-  await setupTestEvent();
+  await setupWeddingEvent();
 
   if (process.env.NODE_ENV !== "production") {
     logger.info("Setting up Vite Development Server Middleware...");
