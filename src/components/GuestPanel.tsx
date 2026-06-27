@@ -51,6 +51,8 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   const [localFilePreview, setLocalFilePreview] = useState<string | null>(null);
   const [previewFileType, setPreviewFileType] = useState<"photo" | "video" | null>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
 
   const [showFilterOverview, setShowFilterOverview] = useState(false);
   const [cameraSnapshot, setCameraSnapshot] = useState<string | null>(null);
@@ -406,6 +408,34 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
       return;
     }
 
+    if (files.length > 1) {
+      setPendingFiles(files);
+      setBatchProgress({ current: 0, total: files.length });
+      setUploadProgress(true);
+      setUploadStatusMsg(`در حال بارگذاری ${files.length} فایل...`);
+      let done = 0;
+      for (const file of files) {
+        done++;
+        setBatchProgress({ current: done, total: files.length });
+        setUploadStatusMsg(`در حال بارگذاری فایل ${done} از ${files.length}...`);
+        const isVideo = file.type.startsWith("video");
+        try {
+          await handleStreamingUpload(file, isVideo ? "video" : "photo", isVideo ? 10 : 0);
+        } catch (err) {
+          console.error("Batch upload item failed", err);
+        }
+      }
+      setUploadStatusMsg(`${files.length} فایل با موفقیت ثبت شد!`);
+      setTimeout(() => {
+        setUploadProgress(false);
+        setUploadStatusMsg("");
+        setUploadPercent(0);
+        setPendingFiles([]);
+      }, 2000);
+      return;
+    }
+
+    // Single file: show preview
     const file = files[0];
     const isVideo = file.type.startsWith("video");
 
@@ -630,6 +660,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   };
 
   const handleLikeMedia = async (mediaId: string, e: React.MouseEvent) => {
+    e.preventDefault();
     e.stopPropagation();
     if (likedMedia.has(mediaId)) return;
     try {
@@ -982,6 +1013,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                           <input
                             type="file"
                             accept="image/*,video/*"
+                            multiple
                             className="hidden"
                             onChange={handleFileChange}
                           />
@@ -1003,7 +1035,13 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
               {uploadProgress && (
                 <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center z-30 text-white select-none">
                   <Loader className="w-10 h-10 text-pink-400 animate-spin mb-4 stroke-1" />
-                  <p className="text-sm font-medium tracking-wide mb-6">{uploadStatusMsg}</p>
+                  <p className="text-sm font-medium tracking-wide mb-4">{uploadStatusMsg}</p>
+
+                  {batchProgress.total > 0 && (
+                    <p className="text-[11px] text-slate-400 mb-3 font-mono">
+                      {batchProgress.current} / {batchProgress.total}
+                    </p>
+                  )}
 
                   <div className="w-full max-w-[200px] h-2 bg-white/10 rounded-full overflow-hidden border border-white/5 relative">
                      <div
@@ -1285,6 +1323,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                             <div className="flex items-center gap-1">
                               {m.guestName === guestName && (
                                 <button
+                                  type="button"
                                   onClick={(e) => handleDeleteMedia(m.id, e)}
                                   className="bg-white/10 hover:bg-red-600/20 p-1.5 rounded-lg flex items-center gap-1 cursor-pointer border border-white/5 transition-all text-red-500"
                                   title="حذف فایل شما"
@@ -1293,6 +1332,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                                 </button>
                               )}
                               <button
+                                type="button"
                                 onClick={(e) => handleLikeMedia(m.id, e)}
                                 disabled={likedMedia.has(m.id)}
                                 className={`p-1.5 rounded-lg flex items-center gap-1 cursor-pointer border transition-all ${
