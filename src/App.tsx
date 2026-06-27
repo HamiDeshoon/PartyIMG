@@ -1,14 +1,15 @@
 import { useState, useEffect, FormEvent, lazy, Suspense } from "react";
-import { Camera, Settings, Plus, ArrowRight, Sparkles, Folder, Heart, Video } from "lucide-react";
+import { Camera, Settings, Plus, ArrowRight, Sparkles, Folder, Heart, Video, Images } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 import { Toaster } from "sonner";
 
 const AdminPanel = lazy(() => import("./components/AdminPanel"));
 const GuestPanel = lazy(() => import("./components/GuestPanel"));
+const LiveAlbum = lazy(() => import("./components/LiveAlbum"));
 
 interface AppRoute {
-  panel: "hub" | "admin" | "guest";
+  panel: "hub" | "admin" | "guest" | "live";
   guestEventId?: string;
 }
 
@@ -48,6 +49,14 @@ export default function App() {
       setRoute({ panel: "hub" });
     } else if (hash === "#/admin" || hash.startsWith("#/admin")) {
       setRoute({ panel: "admin" });
+    } else if (hash.startsWith("#/live/")) {
+      const parts = hash.split("/");
+      const eventId = parts[2];
+      if (eventId) {
+        setRoute({ panel: "live", guestEventId: eventId.toLowerCase().trim() });
+      } else {
+        setRoute({ panel: "hub" });
+      }
     } else if (hash.startsWith("#/guest/")) {
       const parts = hash.split("/");
       const eventId = parts[2];
@@ -82,11 +91,13 @@ export default function App() {
     };
   }, []);
 
-  const navigateTo = (panel: "hub" | "admin" | "guest", guestId?: string) => {
+  const navigateTo = (panel: "hub" | "admin" | "guest" | "live", guestId?: string) => {
     if (panel === "hub") {
       window.location.hash = "/";
     } else if (panel === "admin") {
       window.location.hash = "/admin";
+    } else if (panel === "live" && guestId) {
+      window.location.hash = `/live/${guestId}`;
     } else if (panel === "guest" && guestId) {
       window.location.hash = `/guest/${guestId}`;
     }
@@ -141,11 +152,26 @@ export default function App() {
             </Suspense>
           </motion.div>
         )}
+
+        {route.panel === "live" && route.guestEventId && (
+          <motion.div
+            key="live"
+            initial={{ opacity: 0, scale: 0.98, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, y: -12 }}
+            transition={{ duration: 0.22, ease: "easeOut" }}
+            className="z-10 flex-1 flex flex-col"
+          >
+            <Suspense fallback={<div className="flex-1 flex items-center justify-center text-white/50">در حال بارگذاری...</div>}>
+              <LiveAlbum eventId={route.guestEventId} onBackToHome={() => navigateTo("hub")} />
+            </Suspense>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {route.panel === "hub" && (
         <div className="min-h-[100dvh] flex flex-col justify-between z-10" id="hub_viewport">
-          <main className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 max-w-4xl mx-auto w-full space-y-10 z-10">
+          <main className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 max-w-4xl mx-auto w-full space-y-8 z-10">
             <div className="text-center space-y-6 max-w-xl flex flex-col items-center w-full">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
@@ -199,99 +225,100 @@ export default function App() {
               initial={{ opacity: 0, y: 30 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.3, ease: "easeOut" }}
-              className="w-full grid grid-cols-1 md:grid-cols-2 gap-6"
+              className="w-full grid grid-cols-1 md:grid-cols-3 gap-4"
               id="hub_cards_grid"
             >
               {eventsLoading ? (
                 <EventCardSkeleton />
               ) : (
-                <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl flex flex-col space-y-5">
-                  <div className="space-y-1">
-                    <h3 className="text-base font-medium text-white flex items-center gap-2">
-                      <span className="text-xl">📸</span> ورود به آلبوم
-                    </h3>
-                  </div>
-
-                  <form onSubmit={handleJoinByCode} className="space-y-4 pt-2">
-                    <div className="flex gap-2.5">
-                      <input
-                        type="text"
-                        required
-                        className="flex-1 bg-black/50 border border-white/20 rounded-xl py-3 px-4 focus:outline-hidden focus:ring-2 focus:ring-rose-500/40 focus:border-rose-500/50 text-white font-mono text-sm uppercase placeholder-slate-500 transition-all text-left shadow-inner shadow-black/20"
-                        placeholder="کد رویداد"
-                        value={joinCode}
-                        onChange={(e) => setJoinCode(e.target.value)}
-                        dir="ltr"
-                      />
-                      <button
-                        type="submit"
-                        className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 active:scale-95 text-white font-semibold py-3 px-5 rounded-xl text-sm transition-all flex items-center justify-center cursor-pointer shadow-md shrink-0"
-                      >
-                        ورود
-                        <ArrowRight className="w-4 h-4 mr-2 rtl:-scale-x-100" />
-                      </button>
+                <>
+                  {/* Card 1: Join as guest photographer */}
+                  <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-5 shadow-2xl flex flex-col space-y-4">
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                        <Camera className="w-4 h-4 text-rose-400" />
+                        عکاسی مهمان
+                      </h3>
                     </div>
 
-                    {sampleEvents.length > 0 && (
-                      <div className="pt-2">
-                        <p className="text-[10px] text-slate-400 font-semibold tracking-wider mb-1.5 flex items-center gap-1">رویدادهای فعال:</p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {sampleEvents
-                            .filter(ev => ev.id !== 'test')
-                            .slice(0, 4)
-                            .map(ev => (
-                            <button
-                              key={ev.id}
-                              onClick={() => navigateTo("guest", ev.id)}
-                              className={`border text-[10px] font-mono py-1 px-2.5 rounded-lg transition-all cursor-pointer ${
-                                ev.id === 'fatemeh-hamid'
-                                  ? 'bg-rose-500/10 hover:bg-rose-500/20 border-rose-500/30 text-rose-300'
-                                  : 'bg-white/5 hover:bg-white/15 border border-white/10 text-white'
-                              }`}
-                              dir="ltr"
-                            >
-                              #{ev.id}
-                            </button>
-                          ))}
-                        </div>
+                    <form onSubmit={handleJoinByCode} className="space-y-3">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          required
+                          className="flex-1 bg-black/50 border border-white/20 rounded-xl py-2.5 px-3 focus:outline-hidden focus:ring-2 focus:ring-rose-500/40 focus:border-rose-500/50 text-white font-mono text-xs uppercase placeholder-slate-500 transition-all text-left shadow-inner shadow-black/20"
+                          placeholder="کد رویداد"
+                          value={joinCode}
+                          onChange={(e) => setJoinCode(e.target.value)}
+                          dir="ltr"
+                        />
+                        <button
+                          type="submit"
+                          className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 active:scale-95 text-white font-semibold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center cursor-pointer shadow-md shrink-0"
+                        >
+                          ورود
+                          <ArrowRight className="w-3.5 h-3.5 mr-1.5 rtl:-scale-x-100" />
+                        </button>
                       </div>
-                    )}
 
-                    <div className="pt-3 border-t border-white/10">
                       <motion.button
                         type="button"
                         onClick={() => navigateTo("guest", "fatemeh-hamid")}
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
-                        className="w-full bg-gradient-to-r from-rose-600/20 to-amber-600/20 hover:from-rose-600/35 hover:to-amber-600/35 border border-rose-500/30 hover:border-rose-400 text-rose-300 hover:text-white font-medium py-2.5 px-4 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-inner"
+                        className="w-full bg-gradient-to-r from-rose-600/20 to-amber-600/20 hover:from-rose-600/35 hover:to-amber-600/35 border border-rose-500/30 hover:border-rose-400 text-rose-300 hover:text-white font-medium py-2 px-3 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-inner"
                       >
                         <Heart className="w-3.5 h-3.5 text-rose-400 animate-heart-beat" />
                         ورود به مراسم فاطمه و حمید
                       </motion.button>
+                    </form>
+                  </div>
+
+                  {/* Card 2: Live Album - NEW */}
+                  <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-5 shadow-2xl flex flex-col space-y-4">
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                        <Images className="w-4 h-4 text-emerald-400" />
+                        آلبوم زنده
+                      </h3>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        مشاهده و دانلود عکس‌های مراسم در نمای گالری
+                      </p>
                     </div>
-                  </form>
-                </div>
+                    <motion.button
+                      type="button"
+                      onClick={() => navigateTo("live", "fatemeh-hamid")}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="w-full bg-gradient-to-r from-emerald-600/20 to-teal-600/20 hover:from-emerald-600/35 hover:to-teal-600/35 border border-emerald-500/30 hover:border-emerald-400 text-emerald-300 hover:text-white font-medium py-2.5 px-4 rounded-xl text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-inner"
+                    >
+                      <Images className="w-4 h-4 text-emerald-400" />
+                      مشاهده آلبوم زنده
+                    </motion.button>
+                  </div>
+
+                  {/* Card 3: Admin */}
+                  <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-5 shadow-2xl flex flex-col space-y-4">
+                    <div className="space-y-1">
+                      <h3 className="text-sm font-medium text-white flex items-center gap-2">
+                        <Settings className="w-4 h-4 text-slate-400" />
+                        مدیریت
+                      </h3>
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        پنل مدیریت رویداد و تنظیمات
+                      </p>
+                    </div>
+                    <motion.button
+                      onClick={() => navigateTo("admin")}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      className="w-full bg-white/15 hover:bg-white/25 border border-white/15 text-white font-semibold py-2.5 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                    >
+                      ورود به پنل میزبان
+                    </motion.button>
+                  </div>
+                </>
               )}
-
-              <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl flex flex-col space-y-5">
-                <div className="space-y-1">
-                  <h3 className="text-base font-medium text-white flex items-center gap-2">
-                    <span className="text-xl">⚙️</span> مدیریت میزبان
-                  </h3>
-                </div>
-
-                <div className="space-y-4 pt-2">
-                  <motion.button
-                    onClick={() => navigateTo("admin")}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    className="w-full bg-white/15 hover:bg-white/25 border border-white/15 text-white font-semibold py-3 px-5 rounded-xl text-sm transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
-                  >
-                    ورود به پنل میزبان
-                    <ArrowRight className="w-4 h-4 text-rose-400 rtl:-scale-x-100" />
-                  </motion.button>
-                </div>
-              </div>
             </motion.div>
           </main>
 

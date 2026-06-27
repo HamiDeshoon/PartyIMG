@@ -37,7 +37,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
   const [guestName, setGuestName] = useState("");
   const [isRegistered, setIsRegistered] = useState(false);
-  const [showInvitation, setShowInvitation] = useState(true);
+  const [showInvitation, _setShowInvitation] = useState(false);
 
   const [selectedFilter, setSelectedFilter] = useState<FilterPreset>(FILM_FILTERS[0]);
 
@@ -378,7 +378,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
     recordIntervalRef.current = setInterval(() => {
       setRecordTimer((prev) => {
-        const maxDuration = eventInfo?.maxVideoDuration || 30;
+        const maxDuration = 300; // 5 minutes, unlimited for wedding moments
         if (prev >= maxDuration - 1) {
           mediaRecorder.stop();
           setIsRecording(false);
@@ -680,30 +680,6 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     );
   }
 
-  if (showInvitation) {
-    return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-black">
-        <div className="flex-1 w-full h-full relative">
-          <iframe
-            src="https://canva.link/kyqn7u6wjqmp4uq"
-            className="w-full h-full border-none"
-            title="Event Invitation"
-            allowFullScreen
-          />
-        </div>
-        <div className="absolute bottom-6 left-0 right-0 flex justify-center z-10 px-4 pointer-events-none">
-          <button
-            onClick={() => setShowInvitation(false)}
-            className="pointer-events-auto bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold py-4 px-8 rounded-full shadow-2xl transition-all cursor-pointer flex items-center gap-2 transform hover:scale-105 active:scale-95"
-          >
-            <Camera className="w-5 h-5" />
-            <span>ورود به دوربین / پنل</span>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div dir="rtl" className={`min-h-[100dvh] bg-transparent text-white font-sans flex flex-col relative ${!isOnline ? 'pt-7' : ''}`} id="guest_viewport">
 
@@ -770,8 +746,6 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                   قوانین آلبوم میزبان:
                 </div>
                 <ul className="list-disc list-inside space-y-1 text-slate-300 font-sans">
-                  <li>حداکثر {eventInfo.imageLimit === 0 ? "نامحدود" : `${eventInfo.imageLimit}`} عکس مجاز است.</li>
-                  <li>حداکثر {eventInfo.videoLimit === 0 ? "نامحدود" : `${eventInfo.videoLimit}`} ویدیوی ۳۰ ثانیه‌ای مجاز است.</li>
                   <li>فیلترهای جذاب دوربینی به صورت لحظه‌ای قابل اعمال است.</li>
                 </ul>
               </div>
@@ -793,8 +767,8 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
           <div className="backdrop-blur-md bg-white/5 p-3 flex items-center justify-between border-b border-white/10 text-xs shrink-0 font-sans">
             <span className="text-slate-200">تعداد فایل‌های ثبت شده شما:</span>
             <div className="flex items-center gap-4 text-slate-300">
-              <span dir="ltr">📸 <strong className="text-pink-300 font-mono">{snappedCount}</strong>{eventInfo.imageLimit > 0 && `/${eventInfo.imageLimit}`}</span>
-              <span dir="ltr">🎥 <strong className="text-rose-400 font-mono">{videoCount}</strong>{eventInfo.videoLimit > 0 && `/${eventInfo.videoLimit}`}</span>
+              <span dir="ltr">📸 <strong className="text-pink-300 font-mono">{snappedCount}</strong></span>
+              <span dir="ltr">🎥 <strong className="text-rose-400 font-mono">{videoCount}</strong></span>
             </div>
           </div>
 
@@ -854,7 +828,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                   {isRecording && (
                     <div className="absolute top-4 right-4 z-10 bg-rose-600 border border-rose-500 py-1 px-3 rounded-full flex items-center gap-2 text-[11px] font-bold tracking-wide animate-pulse uppercase text-white" dir="ltr">
                       <div className="w-2 h-2 rounded-full bg-white" />
-                      REC {recordTimer}s / {eventInfo.maxVideoDuration}s
+                      REC {recordTimer}s
                     </div>
                   )}
 
