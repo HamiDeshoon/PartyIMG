@@ -149,6 +149,24 @@ const requireAdmin = (req: any, res: any, next: any) => {
 
 app.use("/uploads", express.static(uploadsBaseDir, { maxAge: "30d" }));
 
+// Fallback middleware: serve from custom save directories
+app.use("/uploads", async (req: any, res, next) => {
+  const urlParts = req.path.replace(/^\/+/, "").split("/");
+  if (urlParts.length >= 2) {
+    const eventId = urlParts[0];
+    try {
+      const event = await db.getEventById(eventId);
+      if (event && event.saveDirectory && event.saveDirectory !== "./uploads") {
+        const customPath = path.resolve(event.saveDirectory, ...urlParts);
+        if (fs.existsSync(customPath)) {
+          return res.sendFile(customPath);
+        }
+      }
+    } catch {}
+  }
+  next();
+});
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, uploadsBaseDir);
@@ -334,7 +352,7 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
           .toBuffer();
           
         const thumbSave = await storageProvider.saveFile(
-            null, eventId, type, `thumb-${req.file.originalname}.webp`, thumbBuffer
+            null, eventId, type, `thumb-${req.file.originalname}.webp`, thumbBuffer, event.saveDirectory || undefined
         );
         thumbnailUrl = thumbSave.url;
       } catch (err) {
@@ -343,7 +361,7 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
     }
 
     const { url: publicUrl, systemSavePath } = await storageProvider.saveFile(
-        req.file, eventId, type, req.file.originalname
+        req.file, eventId, type, req.file.originalname, undefined, event.saveDirectory || undefined
     );
 
     if (!thumbnailUrl) thumbnailUrl = publicUrl;

@@ -7,7 +7,7 @@ import { Readable } from "stream";
 
 export interface StorageProvider {
   init(): Promise<void>;
-  saveFile(file: any, eventId: string, type: string, originalName: string, buffer?: Buffer): Promise<{ url: string, systemSavePath: string }>;
+  saveFile(file: any, eventId: string, type: string, originalName: string, buffer?: Buffer, saveDir?: string): Promise<{ url: string, systemSavePath: string }>;
   deleteFile(url: string, systemSavePath: string, eventId: string, type: string): Promise<void>;
   getFileStream(systemSavePath: string): any; // For archiver
   deleteEventData(eventId: string): Promise<void>;
@@ -26,9 +26,10 @@ export class LocalStorageProvider implements StorageProvider {
     }
   }
 
-  async saveFile(file: any, eventId: string, type: string, originalName: string, buffer?: Buffer): Promise<{ url: string, systemSavePath: string }> {
+  async saveFile(file: any, eventId: string, type: string, originalName: string, buffer?: Buffer, saveDir?: string): Promise<{ url: string, systemSavePath: string }> {
     const typeFolder = type === 'video' ? 'videos' : 'photos';
-    const folder = path.join(this.baseDir, eventId, typeFolder);
+    const effectiveBase = saveDir ? path.resolve(saveDir) : this.baseDir;
+    const folder = path.join(effectiveBase, eventId, typeFolder);
     if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
 
     const ext = path.extname(originalName) || '';
@@ -98,7 +99,7 @@ export class R2StorageProvider implements StorageProvider {
     console.log("R2 Storage initialized.");
   }
 
-  async saveFile(file: any, eventId: string, type: string, originalName: string, buffer?: Buffer): Promise<{ url: string, systemSavePath: string }> {
+  async saveFile(file: any, eventId: string, type: string, originalName: string, buffer?: Buffer, saveDir?: string): Promise<{ url: string, systemSavePath: string }> {
     const typeFolder = type === 'video' ? 'videos' : 'photos';
     const ext = path.extname(originalName) || '';
     const filename = `media-${Date.now()}-${uuidv4()}${ext}`;

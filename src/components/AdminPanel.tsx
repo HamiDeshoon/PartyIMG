@@ -1,8 +1,9 @@
-import React, { useState, useEffect, FormEvent, useMemo } from "react";
+import React, { useState, useEffect, FormEvent, useMemo, useRef } from "react";
 import { 
   Plus, QrCode, Clipboard, Check, Trash2, Folder, 
   Settings, Sparkles, Download, Heart, Eye, Play, 
-  RefreshCw, FileText, Terminal, ArrowLeft, Image, Video, Users, Printer, Activity, Share2
+  RefreshCw, FileText, Terminal, ArrowLeft, Image, Video, Users, Printer, Activity, Share2, X,
+  ChevronLeft, ChevronRight
 } from "lucide-react";
 import { EventConfig, FILM_FILTERS } from "../types";
 import QRCode from "qrcode";
@@ -70,6 +71,9 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
   const [cardCustomImage, setCardCustomImage] = useState<string | null>(null);
   const [customGuestAddress, setCustomGuestAddress] = useState("");
+
+  const [activeLightboxIndex, setActiveLightboxIndex] = useState<number | null>(null);
+  const swipeStartX = useRef<number | null>(null);
 
   const handleCardImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -401,6 +405,63 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const getExt = (m: any) => {
+    if (!m.url) return "jpg";
+    const parts = m.url.split(".");
+    const ext = parts[parts.length - 1]?.split("?")[0] || "jpg";
+    if (m.type === "video" && ext === "jpg") return "mp4";
+    return ext;
+  };
+
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const a = window.document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
+
+  const navigateLightbox = (direction: number) => {
+    setActiveLightboxIndex(prev => {
+      if (prev === null) return prev;
+      const len = mediaItems.length;
+      if (len === 0) return null;
+      const next = prev + direction;
+      if (next < 0) return len - 1;
+      if (next >= len) return 0;
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (activeLightboxIndex === null) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); navigateLightbox(-1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); navigateLightbox(1); }
+      if (e.key === "Escape") { setActiveLightboxIndex(null); }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeLightboxIndex, mediaItems.length]);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    swipeStartX.current = e.touches[0].clientX;
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (swipeStartX.current === null) return;
+    const diff = swipeStartX.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 60) {
+      navigateLightbox(diff > 0 ? 1 : -1);
+    }
+    swipeStartX.current = null;
   };
 
   const copyGuestLink = () => {
@@ -1184,8 +1245,8 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4" id="admin_media_grid">
-                    {mediaItems.map(m => (
-                      <div key={m.id} className="relative group bg-white/5 border border-white/15 rounded-xl overflow-hidden flex flex-col justify-between shadow-lg hover:border-pink-500/40 transition-all font-sans">
+                    {mediaItems.map((m, idx) => (
+                      <div key={m.id} onClick={() => setActiveLightboxIndex(idx)} className="relative group bg-white/5 border border-white/15 rounded-xl overflow-hidden flex flex-col justify-between shadow-lg hover:border-pink-500/40 transition-all font-sans cursor-pointer">
                         
                         {/* Media display content */}
                         <div className="relative aspect-square w-full bg-slate-950 flex items-center justify-center overflow-hidden">
@@ -1430,6 +1491,84 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {activeLightboxIndex !== null && mediaItems[activeLightboxIndex] && (
+        <div
+          className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+          onClick={() => setActiveLightboxIndex(null)}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/5" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setActiveLightboxIndex(null)}
+                className="p-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-white transition-all cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              <span className="text-sm text-white font-medium">{mediaItems[activeLightboxIndex]?.guestName}</span>
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                const m = mediaItems[activeLightboxIndex];
+                handleDownload(m?.url, `${selectedEventId}-${m?.id}.${getExt(m)}`);
+              }}
+              className="p-2 bg-white/5 hover:bg-white/15 rounded-lg text-white transition-all cursor-pointer flex items-center gap-1.5 text-xs"
+            >
+              <Download className="w-4 h-4" />
+              Download
+            </button>
+          </div>
+
+          <div className="flex-1 flex items-center justify-center relative" onClick={e => e.stopPropagation()}>
+            {mediaItems.length > 1 && (
+              <button
+                onClick={() => navigateLightbox(-1)}
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+            )}
+            <div className="w-full h-full flex items-center justify-center p-4 max-w-[90vw] max-h-[85vh]">
+              {mediaItems[activeLightboxIndex]?.type === "video" ? (
+                <video
+                  src={mediaItems[activeLightboxIndex]?.url}
+                  className="max-w-full max-h-full rounded-xl object-contain"
+                  controls autoPlay playsInline
+                />
+              ) : (
+                <img
+                  src={mediaItems[activeLightboxIndex]?.url}
+                  alt=""
+                  className="max-w-full max-h-full rounded-xl object-contain"
+                  draggable={false}
+                />
+              )}
+            </div>
+            {mediaItems.length > 1 && (
+              <button
+                onClick={() => navigateLightbox(1)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center justify-between px-4 py-3 border-t border-white/5 text-[11px] text-slate-500" onClick={e => e.stopPropagation()}>
+            <span>
+              {FILM_FILTERS.find(f => f.id === mediaItems[activeLightboxIndex]?.filter)?.name || mediaItems[activeLightboxIndex]?.filter}
+            </span>
+            <span className="text-white/70 text-xs">
+              {activeLightboxIndex + 1} of {mediaItems.length}
+            </span>
           </div>
         </div>
       )}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   Camera, Video, User, Plus, Sparkles, Heart, Image,
   Lock, Unlock, RotateCw, Play, Square, Check, AlertCircle, Loader, ArrowLeft, Trash2, WifiOff,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, Download
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FILM_FILTERS, FilterPreset } from "../types";
@@ -676,6 +676,64 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleDownload = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const a = window.document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
+
+  const getExt = (m: any) => {
+    if (!m.url) return "jpg";
+    const parts = m.url.split(".");
+    const ext = parts[parts.length - 1]?.split("?")[0] || "jpg";
+    if (m.type === "video" && ext === "jpg") return "mp4";
+    return ext;
+  };
+
+  const navigateLightbox = (direction: number) => {
+    setActiveLightboxIndex(prev => {
+      if (prev === null) return prev;
+      const len = mediaItems.length;
+      if (len === 0) return null;
+      const next = prev + direction;
+      if (next < 0) return len - 1;
+      if (next >= len) return 0;
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (activeLightboxIndex === null) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); navigateLightbox(-1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); navigateLightbox(1); }
+      if (e.key === "Escape") { setActiveLightboxIndex(null); }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeLightboxIndex, mediaItems.length]);
+
+  const swipeStartX = useRef<number | null>(null);
+  const handleTouchStart = (e: React.TouchEvent) => {
+    swipeStartX.current = e.touches[0].clientX;
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (swipeStartX.current === null) return;
+    const diff = swipeStartX.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 60) {
+      navigateLightbox(diff > 0 ? 1 : -1);
+    }
+    swipeStartX.current = null;
   };
 
   if (loading) {
@@ -1388,6 +1446,8 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
             onClick={() => setActiveLightboxIndex(null)}
             className="fixed inset-0 bg-slate-950/95 backdrop-blur-xl z-50 flex flex-col p-4 cursor-zoom-out"
             id="gallery_lightbox"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
           >
             <div className="flex items-center justify-between border-b border-white/10 pb-3 cursor-default select-none pt-2 font-sans" dir="rtl" onClick={(e) => e.stopPropagation()}>
               <div>
@@ -1428,6 +1488,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                     alt="Active visual"
                     className="max-w-full max-h-full rounded-xl object-contain shadow-2xl"
                     referrerPolicy="no-referrer"
+                    draggable={false}
                   />
                 )}
               </motion.div>
@@ -1437,7 +1498,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setActiveLightboxIndex(prev => prev === 0 ? mediaItems.length - 1 : prev! - 1);
+                      navigateLightbox(-1);
                     }}
                     className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 border border-white/10 p-2 rounded-full text-white transition-all cursor-pointer z-10"
                   >
@@ -1446,7 +1507,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setActiveLightboxIndex(prev => prev === mediaItems.length - 1 ? 0 : prev! + 1);
+                      navigateLightbox(1);
                     }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 border border-white/10 p-2 rounded-full text-white transition-all cursor-pointer z-10"
                   >
@@ -1456,7 +1517,18 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
               )}
             </div>
 
-            <div className="text-center py-4 cursor-default select-none" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between py-4 cursor-default select-none" onClick={(e) => e.stopPropagation()}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const m = mediaItems[activeLightboxIndex!];
+                  handleDownload(m?.url, `${eventId}-${m?.id}.${getExt(m)}`);
+                }}
+                className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/10 text-white text-[11px] px-4 py-2 rounded-xl cursor-pointer transition-all"
+              >
+                <Download className="w-3.5 h-3.5" />
+                دانلود
+              </button>
               <span className="bg-white/10 border border-white/10 text-slate-200 text-[11px] font-sans py-1 px-4 rounded-full">
                 {activeLightboxIndex! + 1} از {mediaItems.length}
               </span>

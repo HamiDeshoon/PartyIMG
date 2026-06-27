@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   ArrowLeft, Download, Image, Loader, X, Video,
   CheckSquare, Square as SquareIcon, Users, Filter,
-  DownloadCloud, Search
+  DownloadCloud, Search, User, Heart, Calendar
 } from "lucide-react";
 import { FILM_FILTERS } from "../types";
 
@@ -14,6 +14,7 @@ interface LiveAlbumProps {
 const MODELS_CDN = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.8.2/model/";
 
 type GroupTab = "all" | "faces" | "filter";
+type FilterType = "all" | "photos" | "videos" | "most-liked";
 
 interface FaceGroup {
   label: string;
@@ -29,15 +30,16 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
 
-  // Face grouping state
   const [faceGroups, setFaceGroups] = useState<FaceGroup[]>([]);
   const [faceGrouping, setFaceGrouping] = useState(false);
   const [faceGroupActive, setFaceGroupActive] = useState(false);
   const [activeFaceGroup, setActiveFaceGroup] = useState(0);
   const faceApiRef = useRef<any>(null);
+  const faceGroupsCacheRef = useRef<FaceGroup[] | null>(null);
 
-  // Filter tab state
   const [filterTab, setFilterTab] = useState("all");
+  const [searchGuest, setSearchGuest] = useState("");
+  const [contentFilter, setContentFilter] = useState<FilterType>("all");
 
   const loadMedia = useCallback(async () => {
     try {
@@ -61,18 +63,20 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     loadMedia();
   }, [loadMedia]);
 
-  // Derived data for display groups
   const photos = mediaItems.filter(m => m.type !== "video");
   const allFilters = [...new Set(mediaItems.map(m => m.filter))];
+  const allGuests = [...new Set(mediaItems.map(m => m.guestName).filter(Boolean))];
 
-  const filteredItems = currentGroupTab === "faces"
-    ? (faceGroups[activeFaceGroup]?.items || []).map(f => f.media)
-    : currentGroupTab === "filter"
-    ? (filterTab === "all" ? mediaItems : mediaItems.filter(m => m.filter === filterTab))
-    : mediaItems;
+  const faceGroupingInProgress = faceGrouping;
 
-  // Face grouping
   const runFaceGrouping = async () => {
+    if (faceGroupsCacheRef.current) {
+      setFaceGroups(faceGroupsCacheRef.current);
+      setFaceGroupActive(true);
+      setActiveFaceGroup(0);
+      setCurrentGroupTab("faces");
+      return;
+    }
     setFaceGrouping(true);
     try {
       if (!faceApiRef.current) {
@@ -81,20 +85,20 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
         script.crossOrigin = "anonymous";
         await new Promise<void>((resolve, reject) => {
           script.onload = () => resolve();
-          script.onerror = reject;
+          script.onerror = () => reject(new Error("Failed to load face-api library"));
           window.document.head.appendChild(script);
         });
-        // @ts-ignore
-        faceApiRef.current = window.faceapi;
+        faceApiRef.current = (window as any).faceapi;
       }
       const faceapi = faceApiRef.current;
+      if (!faceapi) throw new Error("Face API not loaded");
 
       await faceapi.nets.tinyFaceDetector.loadFromUri(MODELS_CDN);
       await faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODELS_CDN);
       await faceapi.nets.faceRecognitionNet.loadFromUri(MODELS_CDN);
 
       const results: { media: any; descriptor?: Float32Array; faceCount: number }[] = [];
-      const batchSize = 5;
+      const batchSize = 8;
       for (let i = 0; i < photos.length; i += batchSize) {
         const batch = photos.slice(i, i + batchSize);
         const promises = batch.map(async (m) => {
@@ -102,7 +106,10 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
             const img = window.document.createElement("img");
             img.crossOrigin = "anonymous";
             img.src = m.thumbnailUrl || m.url;
-            await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; });
+            await new Promise<void>((res, rej) => {
+              img.onload = () => res();
+              img.onerror = () => rej(new Error("Image load failed"));
+            });
             const detections = await faceapi
               .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
               .withFaceLandmarks(true)
@@ -125,7 +132,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
       const groups = results.filter(r => r.faceCount >= 3);
       const noFace = results.filter(r => r.faceCount === 0);
 
-      // Try to further split solo faces using descriptor similarity
       const faceClusters: { media: any; descriptor?: Float32Array }[][] = [];
       const used = new Set<number>();
       for (let i = 0; i < solo.length; i++) {
@@ -146,23 +152,32 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
       }
 
       const built: FaceGroup[] = [
-        ...(noFace.length > 0 ? [{ label: `بدون چهره (${noFace.length})`, items: noFace.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
-        ...(faceClusters.length > 0 ? faceClusters.map((c, i) => ({ label: `چهره ${i + 1} (${c.length})`, items: c })) : []),
-        ...(pairs.length > 0 ? [{ label: `دو نفره (${pairs.length})`, items: pairs.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
-        ...(groups.length > 0 ? [{ label: `گروهی (${groups.length})`, items: groups.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
+        ...(noFace.length > 0 ? [{ label: ` بدون چهره (${noFace.length})`, items: noFace.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
+        ...(faceClusters.length > 0 ? faceClusters.map((c, i) => ({ label: ` چهره ${i + 1} (${c.length})`, items: c })) : []),
+        ...(pairs.length > 0 ? [{ label: ` دو نفره (${pairs.length})`, items: pairs.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
+        ...(groups.length > 0 ? [{ label: ` گروهی (${groups.length})`, items: groups.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
       ];
+      faceGroupsCacheRef.current = built;
       setFaceGroups(built);
       setFaceGroupActive(true);
       setActiveFaceGroup(0);
       setCurrentGroupTab("faces");
     } catch (err) {
       console.error("Face grouping failed", err);
+      setFaceGrouping(false);
     } finally {
       setFaceGrouping(false);
     }
   };
 
-  // Batch download
+  const getExt = (m: any) => {
+    if (!m.url) return "jpg";
+    const parts = m.url.split(".");
+    const ext = parts[parts.length - 1]?.split("?")[0] || "jpg";
+    if (m.type === "video" && ext === "jpg") return "mp4";
+    return ext;
+  };
+
   const handleDownload = async (url: string, filename: string) => {
     try {
       const res = await fetch(url);
@@ -182,7 +197,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     for (const id of selectedIds) {
       const m = mediaItems.find(mm => mm.id === id);
       if (m) {
-        await handleDownload(m.url, `${eventId}-${m.id}.jpg`);
+        await handleDownload(m.url, `${eventId}-${m.id}.${getExt(m)}`);
         await new Promise(r => setTimeout(r, 300));
       }
     }
@@ -192,7 +207,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
 
   const handleDownloadAll = async () => {
     for (const m of mediaItems) {
-      await handleDownload(m.url, `${eventId}-${m.id}.jpg`);
+      await handleDownload(m.url, `${eventId}-${m.id}.${getExt(m)}`);
       await new Promise(r => setTimeout(r, 300));
     }
   };
@@ -206,11 +221,75 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     });
   };
 
-  const currentItems = currentGroupTab === "faces"
-    ? (faceGroups[activeFaceGroup]?.items || []).map(f => f.media)
-    : currentGroupTab === "filter"
-    ? (filterTab === "all" ? mediaItems : mediaItems.filter(m => m.filter === filterTab))
-    : mediaItems;
+  const selectAllVisible = () => {
+    const allIds = new Set(getDisplayedItems().map(m => m.id));
+    setSelectedIds(allIds);
+  };
+
+  const deselectAll = () => {
+    setSelectedIds(new Set());
+  };
+
+  const getDisplayedItems = () => {
+    let items = currentGroupTab === "faces"
+      ? (faceGroups[activeFaceGroup]?.items || []).map(f => f.media)
+      : currentGroupTab === "filter"
+      ? (filterTab === "all" ? mediaItems : mediaItems.filter(m => m.filter === filterTab))
+      : mediaItems;
+
+    if (searchGuest.trim()) {
+      const q = searchGuest.trim().toLowerCase();
+      items = items.filter(m => m.guestName?.toLowerCase().includes(q));
+    }
+    if (contentFilter === "photos") {
+      items = items.filter(m => m.type !== "video");
+    } else if (contentFilter === "videos") {
+      items = items.filter(m => m.type === "video");
+    } else if (contentFilter === "most-liked") {
+      items = [...items].sort((a, b) => (b.likes || 0) - (a.likes || 0));
+    }
+    return items;
+  };
+
+  const displayedItems = getDisplayedItems();
+
+  const navigateLightbox = (direction: number) => {
+    setSelectedIdx(prev => {
+      if (prev === null) return prev;
+      const len = displayedItems.length;
+      if (len === 0) return null;
+      const next = prev + direction;
+      if (next < 0) return len - 1;
+      if (next >= len) return 0;
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (selectedIdx === null) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); navigateLightbox(-1); }
+      if (e.key === "ArrowRight") { e.preventDefault(); navigateLightbox(1); }
+      if (e.key === "Escape") { setSelectedIdx(null); }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedIdx, displayedItems.length]);
+
+  const lightboxRef = useRef<HTMLDivElement>(null);
+  const swipeStartX = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    swipeStartX.current = e.touches[0].clientX;
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (swipeStartX.current === null) return;
+    const diff = swipeStartX.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 60) {
+      navigateLightbox(diff > 0 ? 1 : -1);
+    }
+    swipeStartX.current = null;
+  };
 
   return (
     <div dir="rtl" className="min-h-[100dvh] bg-[#0f0f1a] text-white flex flex-col font-sans">
@@ -223,7 +302,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h1 className="text-sm font-semibold text-white">آلبوم زنده</h1>
+            <h1 className="text-sm font-semibold text-white"> </h1>
             <p className="text-[10px] text-slate-500 truncate max-w-[140px]">{eventName || eventId}</p>
           </div>
         </div>
@@ -234,15 +313,30 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                 onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}
                 className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5"
               >
-                لغو
+                
               </button>
+              <button
+                onClick={selectAllVisible}
+                className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5 flex items-center gap-1.5"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                
+              </button>
+              {selectedIds.size > 0 && (
+                <button
+                  onClick={deselectAll}
+                  className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5"
+                >
+                  
+                </button>
+              )}
               <button
                 onClick={handleDownloadSelected}
                 disabled={selectedIds.size === 0}
                 className="text-[11px] px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5"
               >
                 <Download className="w-3.5 h-3.5" />
-                دانلود ({selectedIds.size})
+                 ({selectedIds.size})
               </button>
             </>
           ) : (
@@ -252,12 +346,12 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                 className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5 flex items-center gap-1.5"
               >
                 <CheckSquare className="w-3.5 h-3.5" />
-                انتخاب
+                
               </button>
               <button
                 onClick={handleDownloadAll}
                 className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5"
-                title="دانلود همه"
+                title=" "
               >
                 <DownloadCloud className="w-3.5 h-3.5" />
               </button>
@@ -266,7 +360,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
         </div>
       </header>
 
-      {/* Tab bar */}
       <div className="px-4 py-2 flex gap-1.5 overflow-x-auto scrollbar-none border-b border-white/5">
         <button
           onClick={() => { setCurrentGroupTab("all"); setFilterTab("all"); }}
@@ -276,7 +369,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
           }`}
         >
-          همه ({mediaItems.length})
+           ({mediaItems.length})
         </button>
         <button
           onClick={runFaceGrouping}
@@ -292,7 +385,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
           ) : (
             <Users className="w-3 h-3" />
           )}
-          {faceGrouping ? "در حال تشخیص..." : "چهره‌ها"}
+          {faceGrouping ? "  ..." : " "}
         </button>
         <button
           onClick={() => { setCurrentGroupTab("filter"); setFilterTab("all"); }}
@@ -303,11 +396,10 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
           }`}
         >
           <Filter className="w-3 h-3" />
-          فیلتر
+          
         </button>
       </div>
 
-      {/* Sub-tabs for faces / filter */}
       {currentGroupTab === "faces" && faceGroupActive && (
         <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto scrollbar-none">
           {faceGroups.map((g, i) => (
@@ -327,53 +419,117 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
       )}
 
       {currentGroupTab === "filter" && (
-        <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto scrollbar-none">
-          <button
-            onClick={() => setFilterTab("all")}
-            className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
-              filterTab === "all"
-                ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
-                : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
-            }`}
-          >
-            همه
-          </button>
-          {allFilters.map(f => (
+        <div className="px-4 pb-2 space-y-2">
+          <div className="flex gap-1.5 overflow-x-auto scrollbar-none">
             <button
-              key={f}
-              onClick={() => setFilterTab(f)}
+              onClick={() => setFilterTab("all")}
               className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
-                filterTab === f
+                filterTab === "all"
                   ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
                   : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
               }`}
             >
-              {FILM_FILTERS.find(ff => ff.id === f)?.name || f}
+              
             </button>
-          ))}
+            {allFilters.map(f => (
+              <button
+                key={f}
+                onClick={() => setFilterTab(f)}
+                className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
+                  filterTab === f
+                    ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                    : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
+                }`}
+              >
+                {FILM_FILTERS.find(ff => ff.id === f)?.name || f}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex gap-1.5 overflow-x-auto scrollbar-none items-center">
+            <div className="relative flex items-center">
+              <Search className="w-3 h-3 text-slate-500 absolute right-2" />
+              <input
+                type="text"
+                placeholder="  ..."
+                value={searchGuest}
+                onChange={(e) => setSearchGuest(e.target.value)}
+                className="text-[10px] bg-white/5 border border-white/10 rounded-full px-6 py-1.5 text-white placeholder-slate-600 outline-none w-[130px] focus:border-amber-500/30"
+              />
+            </div>
+            <button
+              onClick={() => setContentFilter("all")}
+              className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
+                contentFilter === "all" ? "bg-sky-500/15 border-sky-500/30 text-sky-300" : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
+              }`}
+            >
+              
+            </button>
+            <button
+              onClick={() => setContentFilter("photos")}
+              className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
+                contentFilter === "photos" ? "bg-sky-500/15 border-sky-500/30 text-sky-300" : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
+              }`}
+            >
+              <Image className="w-3 h-3 inline ml-0.5" />
+              
+            </button>
+            <button
+              onClick={() => setContentFilter("videos")}
+              className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
+                contentFilter === "videos" ? "bg-sky-500/15 border-sky-500/30 text-sky-300" : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
+              }`}
+            >
+              <Video className="w-3 h-3 inline ml-0.5" />
+              
+            </button>
+            <button
+              onClick={() => setContentFilter("most-liked")}
+              className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
+                contentFilter === "most-liked" ? "bg-rose-500/15 border-rose-500/30 text-rose-300" : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
+              }`}
+            >
+              <Heart className="w-3 h-3 inline ml-0.5" />
+              
+            </button>
+          </div>
+
+          {searchGuest && (
+            <div className="flex gap-1 overflow-x-auto scrollbar-none">
+              {allGuests.filter(g => g.toLowerCase().includes(searchGuest.toLowerCase())).slice(0, 10).map(g => (
+                <button
+                  key={g}
+                  onClick={() => setSearchGuest(g)}
+                  className="text-[9px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400 hover:text-white cursor-pointer whitespace-nowrap"
+                >
+                  <User className="w-2.5 h-2.5 inline ml-0.5" />
+                  {g}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Grid */}
       <div className="flex-1 overflow-y-auto px-3 py-4">
         {loading ? (
           <div className="flex items-center justify-center py-32">
             <Loader className="w-8 h-8 text-rose-400 animate-spin" />
           </div>
-        ) : currentItems.length === 0 ? (
+        ) : displayedItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-32 text-slate-600">
             <Image className="w-12 h-12 mb-3 opacity-40" />
-            <p className="text-sm">هیچ عکسی یافت نشد</p>
+            <p className="text-sm">     </p>
           </div>
-        ) : faceGrouping ? (
+        ) : faceGroupingInProgress ? (
           <div className="flex flex-col items-center justify-center py-32 text-slate-400">
             <Loader className="w-10 h-10 text-emerald-400 animate-spin mb-4" />
-            <p className="text-sm">در حال تشخیص چهره‌ها...</p>
-            <p className="text-[10px] text-slate-600 mt-1">پردازش {photos.length} عکس</p>
+            <p className="text-sm">   ...</p>
+            <p className="text-[10px] text-slate-600 mt-1"> {photos.length} </p>
           </div>
         ) : (
           <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 gap-2.5 space-y-2.5">
-            {currentItems.map((m, idx) => {
+            {displayedItems.map((m) => {
               const filterName = FILM_FILTERS.find(f => f.id === m.filter)?.name || m.filter;
               const isSelected = selectedIds.has(m.id);
               return (
@@ -388,8 +544,8 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                     if (selectMode) {
                       toggleSelect(m.id);
                     } else {
-                      const globalIdx = mediaItems.indexOf(m);
-                      if (globalIdx !== -1) setSelectedIdx(globalIdx);
+                      const idx = displayedItems.indexOf(m);
+                      if (idx !== -1) setSelectedIdx(idx);
                     }
                   }}
                 >
@@ -420,7 +576,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
-                            handleDownload(m.url, `${eventId}-${m.id}.jpg`);
+                            handleDownload(m.url, `${eventId}-${m.id}.${getExt(m)}`);
                           }}
                           className="bg-black/60 hover:bg-black/80 backdrop-blur-sm p-1.5 rounded-lg text-white transition-all cursor-pointer border border-white/10"
                         >
@@ -428,12 +584,18 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                         </button>
                       </div>
                     )}
+                    <span className="absolute top-2 left-2 text-[8px] bg-black/60 backdrop-blur-sm text-white/60 px-1 py-0.5 rounded-full z-10">
+                      {filterName}
+                    </span>
                   </div>
                   <div className="p-2 flex items-center justify-between gap-1.5">
                     <p className="text-[10px] text-slate-400 truncate">{m.guestName}</p>
-                    <span className="text-[8px] bg-white/5 text-slate-500 px-1.5 py-0.5 rounded-full shrink-0">
-                      {filterName}
-                    </span>
+                    {m.likes > 0 && (
+                      <span className="text-[8px] bg-rose-500/10 text-rose-400 px-1.5 py-0.5 rounded-full shrink-0 flex items-center gap-0.5">
+                        <Heart className="w-2 h-2 fill-rose-400" />
+                        {m.likes}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -442,9 +604,14 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
         )}
       </div>
 
-      {/* Lightbox */}
-      {selectedIdx !== null && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex flex-col" onClick={() => setSelectedIdx(null)}>
+      {selectedIdx !== null && displayedItems[selectedIdx] && (
+        <div
+          ref={lightboxRef}
+          className="fixed inset-0 z-50 bg-black/95 flex flex-col"
+          onClick={() => setSelectedIdx(null)}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/5" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-3">
               <button
@@ -454,32 +621,64 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               >
                 <X className="w-5 h-5" />
               </button>
-              <span className="text-sm text-white font-medium">{mediaItems[selectedIdx]?.guestName}</span>
+              <span className="text-sm text-white font-medium">{displayedItems[selectedIdx]?.guestName}</span>
             </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => handleDownload(mediaItems[selectedIdx]?.url, `${eventId}-${mediaItems[selectedIdx]?.id}.jpg`)}
+                onClick={() => handleDownload(displayedItems[selectedIdx]?.url, `${eventId}-${displayedItems[selectedIdx]?.id}.${getExt(displayedItems[selectedIdx])}`)}
                 className="p-2 bg-white/5 hover:bg-white/15 rounded-lg text-white transition-all cursor-pointer flex items-center gap-1.5 text-xs"
               >
                 <Download className="w-4 h-4" />
-                دانلود
+                
               </button>
             </div>
           </div>
-          <div className="flex-1 flex items-center justify-center p-4" onClick={e => e.stopPropagation()}>
-            {mediaItems[selectedIdx]?.type === "video" ? (
-              <video src={mediaItems[selectedIdx]?.url} className="max-w-full max-h-full rounded-xl object-contain" controls autoPlay playsInline />
-            ) : (
-              <img src={mediaItems[selectedIdx]?.url} alt="" className="max-w-full max-h-full rounded-xl object-contain" />
+
+          <div className="flex-1 flex items-center justify-center relative" onClick={e => e.stopPropagation()}>
+            {displayedItems.length > 1 && (
+              <button
+                onClick={() => navigateLightbox(-1)}
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+              </button>
+            )}
+            <div className="w-full h-full flex items-center justify-center p-4 max-w-[90vw] max-h-[85vh]">
+              {displayedItems[selectedIdx]?.type === "video" ? (
+                <video
+                  src={displayedItems[selectedIdx]?.url}
+                  className="max-w-full max-h-full rounded-xl object-contain"
+                  controls
+                  autoPlay
+                  playsInline
+                />
+              ) : (
+                <img
+                  src={displayedItems[selectedIdx]?.url}
+                  alt=""
+                  className="max-w-full max-h-full rounded-xl object-contain"
+                  draggable={false}
+                  style={{ cursor: "default" }}
+                />
+              )}
+            </div>
+            {displayedItems.length > 1 && (
+              <button
+                onClick={() => navigateLightbox(1)}
+                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+              </button>
             )}
           </div>
+
           <div className="flex items-center justify-between px-4 py-3 border-t border-white/5 text-[11px] text-slate-500" onClick={e => e.stopPropagation()}>
             <span>
-              {FILM_FILTERS.find(f => f.id === mediaItems[selectedIdx]?.filter)?.name || mediaItems[selectedIdx]?.filter}
+              {FILM_FILTERS.find(f => f.id === displayedItems[selectedIdx]?.filter)?.name || displayedItems[selectedIdx]?.filter}
             </span>
-            <span>
-              {selectedIdx + 1} از {mediaItems.length}
+            <span className="text-white/70 text-xs">
+              {selectedIdx + 1}  {displayedItems.length}
             </span>
           </div>
         </div>
