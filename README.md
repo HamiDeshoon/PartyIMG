@@ -1,79 +1,84 @@
-# شات‌باکس (ShotBox) - Disposable Wedding Guest Camera Album 📸✨
+# POV Shared Photo Album
 
-یک وب‌اپلیکیشن وب‌گردی فاقد نصب، زیبا و فوق‌العاده سریع به صورت **Full-Stack (React/Vite & Express)** که به عنوان آلبوم عکاسی دیجیتال و دوربین نوستالژیک بر روی دستگاه مهمانان مجالس (مانند عروسی حمید و فاطمه) عمل می‌کند.
+**A full-stack shared wedding and party photo album application.**
 
----
-
-## 🎨 ویژگی‌های برجسته نرم‌افزار
-
-### ۱. عکاسی با دوربین اختصاصی نوستالژیک (Retro Viewfinder)
-مهمانان تنها با اسکن یک QR کد ساده از روی کارت مراسم، بدون نیاز به نصب هرگونه نرم‌افزار، وارد دوربین دیجیتال یک‌بار مصرف شات‌باکس می‌شوند. آن‌ها می‌توانند به صورت مستقیم اقدام به عکاسی و فیلم‌برداری (تا ۳۰ ثانیه) کنند.
-
-### ۲. پیش‌نمایش و اعمال فیلترهای جذاب نوستالژیک (Live CSS & Canvas Filters)
-امکان عکاسی با فیلترهای عکاسی کلاسیک و آنالوگ شامل:
-- **Vintage Matte Pink**: یک بافت گرم و رمانتیک صورتی-طلایی ملایم.
-- **VHS Vintage Glitch**: شیفت رنگ کلاسیک نوستالژیک مشابه نوارهای مغناطیسی قدیمی با کنتراست بالا.
-- **Kodak Gold 200**: شبیه‌ساز نگاتیو افسانه‌ای کداک با رنگ پوست گرم مایل به طلایی و نویزهای ملایم.
-- **Sepia & Grayscale**: برای سبک‌های سیاه و سفید کلاسیک.
-*فیلترها به صورت درجا روی بوم نقاشی مرورگر (Canvas) به عکس اعمال شده و سپس برای سرور ارسال می‌شوند.*
-
-### ۳. ورود کاملاً اختیاری و ناشناس (Optional Guest Entrance)
-مهمانان می‌توانند نام خود را وارد کرده یا بدون نیاز به نام، به صورت کاملاً ناشناس و تنها با کلیک روی یک دکمه وارد گالری شده و عکس‌های خلاقانه ثبت کنند.
-
-### ۴. پنل مدیریت حرفه‌ای میزبان (Host Admin Dashboard)
-- مدیریت و تعریف رویدادهای مختلف بصورت لحظه‌ای.
-- محدودسازی ظرفیت آپلود عکس و فیلم برای هر مهمان جهت بهینه‌سازی دیسک.
-- امکان ساخت و چاپ کارت‌های فیزیکی جذاب مراسم همراه با راهنما و بارکد پرسرعت اسکن آفلاین (Polaroid design).
-- دانلود یک‌جای تمام تصاویر به صورت فایل **ZIP**.
-- یکپارچه‌سازی محلی با سیستم دایرکتوری لوکال (Local Directory Sync).
+Hosts can create custom events, generate QR codes, specify save directories to sync to localhost, and configure upload limits. Guests can capture/upload photos with aesthetic retro filters and record 30‑second videos.
 
 ---
 
-## 🛠️ ساختار فنی لایه‌ها (Tech Stack)
+## Table of Contents
 
-### لایه کلاینت (Client - Single Page App)
-- **React 18** با ساختار روان **Vite**.
-- **Tailwind CSS** برای رابط کاربری مینیمال، خیره‌کننده و تاریک با تضاد نوری عالی.
-- افکت‌های حرکتی و جابجایی صفحات با **Motion (Framer Motion)**.
-- آیکون‌های متناسب با سبک طراحی لوکس از لایبرری **Lucide React**.
-
-### لایه سرور (Backend API & Storage)
-- **Node.js Express Framework**: مدیریت ترافیک‌های محلی و بارگذاری رسانه‌ها.
-- **SQLite Database** بصورت محلی برای همبستگی کامل و بدون تاخیر رسانه‌ها با جزئیات عکاس.
-- **Multer Streaming**: کنترل همزمان سایز فایل‌ها و ذخیره‌سازی ایمن رسانه‌ها بدون سرریز دیسک.
+1. [Features](#features)
+2. [Getting Started](#getting-started)
+3. [Documentation](#documentation)
+4. [Contributing](#contributing)
+5. [License](#license)
 
 ---
 
-## 🚀 راهنمای راه‌اندازی و اجرا
+## Features
 
-### پیش‌نیازها
-مطمئن شوید که Node.js روی سیستم شما نصب است.
+- **Event Management**: Create, update, and delete events with customizable settings.
+- **QR Code Integration**: Generate QR codes for easy event sharing.
+- **Retro Filters**: Apply vintage filters to photos before upload.
+- **Video Support**: Record up to 30‑second videos.
+- **Admin Panel**: Secure admin interface for event configuration.
+- **Guest Panel**: Simple UI for guests to capture and upload media.
+- **Local & Edge Deployments**: Works locally with SQLite or can be migrated to Cloudflare Workers.
 
-### ۱. نصب وابستگی‌ها
-```bash
-npm install
-```
+## Getting Started
 
-### ۲. شخصی‌سازی فایل کانفیگ
-یک فایل به نام `.env` براساس نمونه زیر بسازید:
-```env
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=password123
-SESSION_SECRET=your-secret-session-key
-```
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/PartyIMG.git
+   cd PartyIMG
+   ```
+2. **Install dependencies**
+   ```bash
+   npm install
+   ```
+3. **Create an environment file**
+   ```bash
+   cp .env.example .env
+   ```
+   Fill in `SESSION_SECRET` (minimum 32 characters) along with `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
+4. **Run the development server**
+   ```bash
+   npm run dev
+   ```
+   The frontend will be served at `http://localhost:5173` and the API at `http://localhost:3000`.
 
-### ۳. اجرای سرویس در حالت توسعه (Development)
-سرویس وب‌اپ به همراه پورت ۳۰۰۰ جهت ارتباط لوکال اجرا خواهد شد:
-```bash
-npm run dev
-```
+For detailed build and deployment instructions, see the **Documentation** section below.
 
-### ۴. ساخت بیلد در حالت پروداکشن (Production)
-```bash
-npm run build
-npm start
-```
+## Documentation
 
----
+The `docs` folder contains in‑depth documentation:
 
-*بومی‌سازی و شخصی‌سازی شده با عشق، ویژه مراسم خاطره‌انگیز حمید و فاطمه ❤️*
+| Document | Description |
+|----------|-------------|
+| `architecture-report.md` | Overview of system architecture (frontend, backend, database, upload pipeline, authentication flow, and build pipeline). |
+| `bug-report.md` | List of identified bugs and their resolutions, covering UI memory leaks, orphan media, security misconfigurations, and upload limit handling. |
+| `cloudflare-audit.md` | Compatibility audit for Cloudflare Workers, highlighting filesystem, SQLite, and process‑spawning limitations with migration recommendations. |
+| `deployment-guide.md` | Prerequisites, build steps, local setup, and deployment instructions for Cloud Run and Cloudflare. |
+| `performance-audit.md` | Performance optimizations for both frontend (code‑splitting, lazy loading) and backend (storage abstraction, upload speed), plus measured metrics. |
+| `production-readiness.md` | Production checklist, backup strategy, rollback plan, monitoring setup, and next steps for edge transition. |
+| `security-audit.md` | Security hardening details: session management, CSRF protection, upload validation, rate limiting, and other mitigations. |
+| `ux-review.md` | UI/UX review covering new preview sandbox, empty/error states, feedback overlays, and usability polish. |
+
+You can explore each document for more granular information about the project.
+
+## Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1. Fork the repository.
+2. Create a feature branch (`git checkout -b feature/YourFeature`).
+3. Commit your changes with clear messages.
+4. Open a pull request describing the changes and referencing any relevant issues.
+
+Make sure to run the test suite (`npm test`) and linting (`npm run lint`) before submitting.
+
+## License
+
+This project is licensed under the MIT License. See the `LICENSE` file for details.
+
