@@ -44,8 +44,8 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [formHost, setFormHost] = useState("");
   const [formDesc, setFormDesc] = useState("");
   const [formReveal, setFormReveal] = useState<"instant" | "delay">("instant");
-  const [formImgLimit, setFormImgLimit] = useState(15);
-  const [formVidLimit, setFormVidLimit] = useState(3);
+  const [formImgLimit, setFormImgLimit] = useState(0);
+  const [formVidLimit, setFormVidLimit] = useState(0);
   const [formSaveDir, setFormSaveDir] = useState("./uploads");
 
   // Sync state settings
@@ -56,6 +56,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   // System statistics
   const [loading, setLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [wsConnected, setWsConnected] = useState(false);
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
@@ -71,6 +72,34 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
   const [cardCustomImage, setCardCustomImage] = useState<string | null>(null);
   const [customGuestAddress, setCustomGuestAddress] = useState("");
+
+  // Enhanced Print Card options
+  const [cardPaperSize, setCardPaperSize] = useState('4x6');
+  const [cardOrientation, setCardOrientation] = useState<'portrait' | 'landscape'>('portrait');
+  const [cardShowBleed, setCardShowBleed] = useState(true);
+
+  const PAPER_SIZES: Record<string, { width: number; height: number; label: string }> = {
+    '4x6': { width: 4, height: 6, label: '4×6"' },
+    '5x7': { width: 5, height: 7, label: '5×7"' },
+    'a6': { width: 4.1, height: 5.8, label: 'A6' },
+    'table-tent': { width: 5, height: 4, label: 'Table Tent' },
+  };
+
+  // Inject print styles for card preview
+  useEffect(() => {
+    const style = window.document.createElement('style');
+    style.id = 'card-print-styles';
+    style.textContent = `
+      @media print {
+        body * { visibility: hidden; }
+        #card-preview, #card-preview * { visibility: visible; }
+        #card-preview { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
+        @page { margin: 0; }
+      }
+    `;
+    window.document.head.appendChild(style);
+    return () => { const s = window.document.getElementById('card-print-styles'); if (s) s.remove(); };
+  }, []);
 
   const [activeLightboxIndex, setActiveLightboxIndex] = useState<number | null>(null);
   const swipeStartX = useRef<number | null>(null);
@@ -241,26 +270,50 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     }
   }, [guestLink]);
 
-  // Polling for live events
+  // WebSocket real-time updates
   useEffect(() => {
-    if (selectedEventId && isAuthenticated && !showCreateModal) {
-      let active = true;
-      const poll = async () => {
-        try {
-          const res = await fetch(`/api/events/${selectedEventId}/media?isAdmin=true&limit=1000`);
-          if (res.ok && active) {
-            const data = await res.json();
-            setMediaItems(data.media || []);
-          }
-        } catch(e) {}
-      };
-      
-      const interval = setInterval(poll, 10000); // 10s optimized polling
-      return () => { 
-        active = false;
-        clearInterval(interval); 
-      };
-    }
+    if (!selectedEventId || !isAuthenticated || showCreateModal) return;
+
+    // Initial fetch
+    fetchMedia(selectedEventId);
+
+    // WebSocket connection
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+
+    const connect = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => setWsConnected(true);
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'media:uploaded' && msg.data.eventId === selectedEventId) {
+              setMediaItems(prev => [msg.data.media, ...prev]);
+            } else if (msg.type === 'media:liked' && msg.data.eventId === selectedEventId) {
+              if (msg.data.media) {
+                setMediaItems(prev => prev.map(m => m.id === msg.data.mediaId ? { ...m, ...msg.data.media } : m));
+              }
+            } else if (msg.type === 'media:deleted' && msg.data.eventId === selectedEventId) {
+              setMediaItems(prev => prev.filter(m => m.id !== msg.data.mediaId));
+            }
+          } catch(e) {}
+        };
+        ws.onclose = () => {
+          setWsConnected(false);
+          reconnectTimer = setTimeout(connect, 5000);
+        };
+        ws.onerror = () => { ws?.close(); };
+      } catch(e) {}
+    };
+
+    connect();
+    return () => {
+      if (ws) ws.close();
+      clearTimeout(reconnectTimer);
+    };
   }, [selectedEventId, isAuthenticated, showCreateModal]);
 
   // Fetch media for specific event
@@ -312,8 +365,8 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       setFormHost("");
       setFormDesc("");
       setFormReveal("instant");
-      setFormImgLimit(15);
-      setFormVidLimit(3);
+      setFormImgLimit(0);
+      setFormVidLimit(0);
     } catch (err) {
       console.error(err);
       toast.error("Connection error when saving event.");
@@ -891,7 +944,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       {/* Admin Navbar */}
       <nav id="admin_nav" className="sticky top-0 z-25 flex items-center justify-between px-6 py-4 backdrop-blur-md bg-white/5 border-b border-white/10 text-white shadow-lg">
         <div className="flex items-center space-x-3 rtl:space-x-reverse">
-          <button 
+          <button type="button"
             id="admin_back_btn"
             onClick={onBackToHome} 
             className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white backdrop-blur-md border border-white/10 transition-colors cursor-pointer"
@@ -903,19 +956,20 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
             <h1 className="text-xl font-display font-medium tracking-tight text-white flex items-center gap-2">
               <Settings className="w-5 h-5 text-pink-400 animate-spin-slow" />
               LENS:SHARE <span className="text-xs font-mono text-pink-400 border border-pink-400/35 px-2 py-0.5 rounded-full uppercase" dir="ltr">Admin</span>
+              <span className={`inline-block w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`} title={wsConnected ? 'Connected' : 'Disconnected'} />
             </h1>
             <p className="text-xs font-sans text-slate-400 mt-0.5">مدیریت حرفه‌ای مراسم و گالری تصاویر</p>
           </div>
         </div>
         
         <div className="flex items-center gap-3">
-          <button
+          <button type="button"
             onClick={handleLogout}
             className="hidden md:flex border border-white/20 hover:bg-white/10 text-white font-medium py-2 px-4 rounded-xl text-sm items-center gap-2 transition-all cursor-pointer"
           >
             خروج
           </button>
-          <button
+          <button type="button"
             id="admin_create_event_trigger"
             onClick={() => setShowCreateModal(true)}
             className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center gap-2 transition-all shadow-lg active:scale-95 cursor-pointer"
@@ -946,7 +1000,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
             ) : (
               <div className="space-y-1 max-h-[450px] overflow-y-auto pr-1">
                 {events.map(ev => (
-                  <button
+                  <button type="button"
                     key={ev.id}
                     id={`event_btn_${ev.id}`}
                     onClick={() => setSelectedEventId(ev.id)}
@@ -973,7 +1027,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
             <div className="backdrop-blur-xl bg-white/5 border border-rose-500/25 rounded-2xl p-4 shadow-xl" id="danger_zone">
               <h3 className="text-xs font-bold text-rose-400 mb-2">منطقه خطر</h3>
               <p className="text-[11px] text-slate-350 mb-3 leading-relaxed">حذف این رویداد، تمامی فایل‌های مهمانان را برای همیشه پاک می‌کند.</p>
-              <button
+              <button type="button"
                 id="delete_event_btn"
                 onClick={() => handleDeleteEvent(selectedEvent.id)}
                 className="w-full bg-rose-950/20 hover:bg-rose-900/40 text-rose-300 border border-rose-500/30 text-xs font-medium py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
@@ -1036,7 +1090,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                   </div>
                   
                   <div className="w-full space-y-2 text-center font-sans">
-                    <button
+                    <button type="button"
                       id="copy_guest_link_btn"
                       onClick={copyGuestLink}
                       className="text-xs bg-white/10 hover:bg-white/15 text-white font-bold py-1.5 px-3 rounded-lg transition-all flex items-center gap-1.5 justify-center w-full cursor-pointer border border-white/5"
@@ -1047,7 +1101,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
 
 
                     <div className="grid grid-cols-3 gap-1.5 mt-2">
-                      <button
+                      <button type="button"
                         onClick={downloadStandaloneQR}
                         className="text-[9px] bg-black/40 hover:bg-black/60 text-slate-300 hover:text-white font-bold py-1.5 px-1 rounded-lg transition-all flex flex-col items-center justify-center gap-1 cursor-pointer border border-white/10"
                         title="دانلود تصویر خام کد QR"
@@ -1055,7 +1109,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                         <Download className="w-3 h-3 text-pink-400" />
                         ذخیره QR
                       </button>
-                      <button
+                      <button type="button"
                         onClick={handleNativeShare}
                         className="text-[9px] bg-black/40 hover:bg-black/60 text-slate-300 hover:text-white font-bold py-1.5 px-1 rounded-lg transition-all flex flex-col items-center justify-center gap-1 cursor-pointer border border-white/10"
                         title="ارسال لینک رویداد"
@@ -1174,7 +1228,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                           }}
                           placeholder="e.g. C:/EventMedia/Weddings"
                         />
-                        <button
+                        <button type="button"
                           onClick={() => handleUpdateSyncSettings({ saveDirectory: activeSyncDir })}
                           className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs px-3 rounded-lg font-medium transition-all cursor-pointer"
                         >
@@ -1184,6 +1238,60 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                       <p className="text-[10px] text-slate-450 mt-1">
                         Any relative path saves locally in your sandbox folder. Absolute paths (e.g. <code className="bg-purple-950/20 text-purple-300 px-1 rounded font-mono text-[9px] border border-purple-500/10">/var/data</code>) attempt disk writes on the server container.
                       </p>
+                    </div>
+
+                    {/* Cover Image */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-350 mb-1">Event Cover Image:</label>
+                      <div className="flex gap-2 items-center">
+                        {selectedEvent.coverImage && (
+                          <img src={selectedEvent.coverImage} className="w-16 h-16 rounded-lg object-cover border border-white/10" />
+                        )}
+                        <input type="file" accept="image/*" className="hidden" id="coverImageUpload"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const formData = new FormData();
+                            formData.append("fileData", file);
+                            formData.append("imageType", "coverImage");
+                            const res = await fetch(`/api/events/${selectedEventId}/upload/event-image`, {
+                              method: "POST", credentials: "include", body: formData
+                            });
+                            if (res.ok) {
+                              const data = await res.json();
+                              setSelectedEvent((prev: any) => ({ ...prev, coverImage: data.url }));
+                              toast.success("Cover image uploaded");
+                            }
+                          }}
+                        />
+                        <label htmlFor="coverImageUpload" className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-all">Upload</label>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-350 mb-1">Couple Photo:</label>
+                      <div className="flex gap-2 items-center">
+                        {selectedEvent.couplePhoto && (
+                          <img src={selectedEvent.couplePhoto} className="w-16 h-16 rounded-lg object-cover border border-white/10" />
+                        )}
+                        <input type="file" accept="image/*" className="hidden" id="couplePhotoUpload"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const formData = new FormData();
+                            formData.append("fileData", file);
+                            formData.append("imageType", "couplePhoto");
+                            const res = await fetch(`/api/events/${selectedEventId}/upload/event-image`, {
+                              method: "POST", credentials: "include", body: formData
+                            });
+                            if (res.ok) {
+                              const data = await res.json();
+                              setSelectedEvent((prev: any) => ({ ...prev, couplePhoto: data.url }));
+                              toast.success("Couple photo uploaded");
+                            }
+                          }}
+                        />
+                        <label htmlFor="couplePhotoUpload" className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-all">Upload</label>
+                      </div>
                     </div>
 
                     <hr className="border-white/10" />
@@ -1200,7 +1308,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                       <p className="text-[10px] text-slate-400 mt-1 mb-2">
                         If delayed-reveal, click below to develop the physical negatives so all guests can look at the album.
                       </p>
-                      <button
+                      <button type="button"
                         onClick={() => handleUpdateSyncSettings({ isRevealed: !selectedEvent.isRevealed })}
                         className={`w-full py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                           selectedEvent.isRevealed 
@@ -1226,7 +1334,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                     <p className="text-xs text-slate-350 mt-0.5">مشاهده عکس‌ها و مدیریت فایل‌ها</p>
                   </div>
                   
-                  <button 
+                  <button type="button"
                     onClick={() => fetchMedia(selectedEventId)} 
                     className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
                     title="به روز رسانی گالری"
@@ -1293,14 +1401,14 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                           
                           <div className="flex items-center justify-between border-t border-white/5 pt-2 shrink-0">
                             <div className="flex items-center gap-1">
-                              <button
+                              <button type="button"
                                 onClick={() => handleDeleteMedia(m.id)}
                                 className="text-slate-400 hover:text-red-400 transition-colors py-0.5 px-1 hover:bg-white/5 rounded"
                                 title="حذف"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
-                              <button
+                              <button type="button"
                                 onClick={() => handleLikeMedia(m.id)}
                                 disabled={likedMedia.has(m.id)}
                                 className={`transition-colors flex items-center gap-1 text-[11px] font-medium py-0.5 px-1 rounded ${
@@ -1338,7 +1446,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                   از منوی کناری رویداد مورد نظر را انتخاب کنید و یا با زدن دکمه زیر یک مراسم جدید بسازید.
                 </p>
               </div>
-              <button
+              <button type="button"
                 onClick={() => setShowCreateModal(true)}
                 className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-semibold py-2 px-6 rounded-xl text-sm shadow-md transition-all cursor-pointer"
               >
@@ -1495,6 +1603,88 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         </div>
       )}
 
+      {/* Card Studio Modal */}
+      {showCardStudio && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="backdrop-blur-3xl bg-slate-900/95 rounded-3xl w-full max-w-2xl overflow-hidden border border-white/20 shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="bg-white/5 border-b border-white/10 p-4 flex items-center justify-between">
+              <h3 className="text-lg font-display font-medium text-white flex items-center gap-2">
+                <Printer className="w-5 h-5 text-pink-400" />
+                Card Studio
+              </h3>
+              <button type="button" onClick={() => setShowCardStudio(false)}
+                className="p-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-white/60 hover:text-white transition-all cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto space-y-4">
+              <div className="bg-white/5 rounded-xl p-4 border border-white/10 space-y-3">
+                <h4 className="text-sm font-semibold text-white">Print Settings</h4>
+                <div className="flex flex-wrap gap-3">
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Paper Size</label>
+                    <select value={cardPaperSize} onChange={e => setCardPaperSize(e.target.value)}
+                      className="bg-white/10 border border-white/20 text-white text-xs rounded-lg px-2 py-1.5">
+                      {Object.entries(PAPER_SIZES).map(([k, v]) => (
+                        <option key={k} value={k}>{v.label} ({v.width}×{v.height}")</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Orientation</label>
+                    <div className="flex gap-1">
+                      <button type="button" onClick={() => setCardOrientation('portrait')}
+                        className={`text-xs px-2 py-1.5 rounded-lg border ${cardOrientation === 'portrait' ? 'bg-blue-600/30 border-blue-500/50 text-blue-300' : 'bg-white/10 border-white/20 text-white/60'}`}>
+                        Portrait
+                      </button>
+                      <button type="button" onClick={() => setCardOrientation('landscape')}
+                        className={`text-xs px-2 py-1.5 rounded-lg border ${cardOrientation === 'landscape' ? 'bg-blue-600/30 border-blue-500/50 text-blue-300' : 'bg-white/10 border-white/20 text-white/60'}`}>
+                        Landscape
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">Bleed</label>
+                    <button type="button" onClick={() => setCardShowBleed(p => !p)}
+                      className={`text-xs px-2 py-1.5 rounded-lg border ${cardShowBleed ? 'bg-emerald-600/30 border-emerald-500/50 text-emerald-300' : 'bg-white/10 border-white/20 text-white/60'}`}>
+                      3mm {cardShowBleed ? 'ON' : 'OFF'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div id="card-preview" className={`relative mx-auto ${cardOrientation === 'portrait' ? 'max-w-[320px]' : 'max-w-[420px]'}`}
+                style={{ aspectRatio: cardOrientation === 'portrait' ? `${PAPER_SIZES[cardPaperSize].width}/${PAPER_SIZES[cardPaperSize].height}` : `${PAPER_SIZES[cardPaperSize].height}/${PAPER_SIZES[cardPaperSize].width}` }}>
+                <div className="w-full h-full bg-white rounded-xl overflow-hidden shadow-lg relative">
+                  {cardShowBleed && (
+                    <div className="absolute inset-0 border-2 border-dashed border-red-400/50 rounded-xl m-[3mm] pointer-events-none z-10" />
+                  )}
+                  <div className="p-4 h-full flex flex-col items-center justify-center gap-2 text-gray-900">
+                    {qrCodeDataUrl && <img src={qrCodeDataUrl} className="w-24 h-24" alt="QR" />}
+                    <p className="text-xs font-semibold text-center leading-tight">{selectedEvent?.name || 'Event Name'}</p>
+                    <p className="text-[10px] text-gray-500 text-center leading-tight">
+                      {guestLink.replace(/.*\//, '') || 'party/event-id'}
+                    </p>
+                    <p className="text-[8px] text-gray-400 mt-auto">Scan to upload photos</p>
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-center">
+                <button type="button"
+                  onClick={() => { setShowCardStudio(false); setTimeout(() => window.print(), 100); }}
+                  className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">
+                  🖨 Print Card
+                </button>
+                <button type="button"
+                  onClick={() => { setShowCardStudio(false); setTimeout(() => window.print(), 100); }}
+                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">
+                  Download
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeLightboxIndex !== null && mediaItems[activeLightboxIndex] && (
         <div
           className="fixed inset-0 z-50 bg-black/95 flex flex-col"
@@ -1529,7 +1719,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
 
           <div className="flex-1 flex items-center justify-center relative" onClick={e => e.stopPropagation()}>
             {mediaItems.length > 1 && (
-              <button
+              <button type="button"
                 onClick={() => navigateLightbox(-1)}
                 className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
               >
@@ -1553,7 +1743,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               )}
             </div>
             {mediaItems.length > 1 && (
-              <button
+              <button type="button"
                 onClick={() => navigateLightbox(1)}
                 className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
               >

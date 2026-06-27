@@ -13,6 +13,7 @@ export default defineConfig(() => {
     },
     server: {
       host: '0.0.0.0',
+      allowedHosts: process.env.CUSTOM_DOMAIN ? [process.env.CUSTOM_DOMAIN] : undefined,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

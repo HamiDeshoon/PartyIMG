@@ -30,6 +30,11 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
 
+  const [slideshowActive, setSlideshowActive] = useState(false);
+  const [slideshowIndex, setSlideshowIndex] = useState(0);
+  const [slideshowPaused, setSlideshowPaused] = useState(false);
+  const slideshowTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const [faceGroups, setFaceGroups] = useState<FaceGroup[]>([]);
   const [faceGrouping, setFaceGrouping] = useState(false);
   const [faceGroupActive, setFaceGroupActive] = useState(false);
@@ -230,6 +235,36 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     setSelectedIds(new Set());
   };
 
+  const startSlideshow = (startIndex: number) => {
+    setSlideshowIndex(startIndex);
+    setSlideshowActive(true);
+    setSlideshowPaused(false);
+  };
+
+  const stopSlideshow = () => {
+    setSlideshowActive(false);
+    setSlideshowPaused(false);
+    if (slideshowTimerRef.current) {
+      clearInterval(slideshowTimerRef.current);
+      slideshowTimerRef.current = null;
+    }
+  };
+
+  const nextSlide = () => {
+    setSlideshowIndex(prev => (prev + 1) % (displayedItems.length || 1));
+  };
+
+  const prevSlide = () => {
+    setSlideshowIndex(prev => {
+      const len = displayedItems.length || 1;
+      return (prev - 1 + len) % len;
+    });
+  };
+
+  const toggleSlideshowPause = () => {
+    setSlideshowPaused(prev => !prev);
+  };
+
   const getDisplayedItems = () => {
     let items = currentGroupTab === "faces"
       ? (faceGroups[activeFaceGroup]?.items || []).map(f => f.media)
@@ -276,6 +311,34 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectedIdx, displayedItems.length]);
 
+  useEffect(() => {
+    if (!slideshowActive || slideshowPaused) {
+      if (slideshowTimerRef.current) {
+        clearInterval(slideshowTimerRef.current);
+        slideshowTimerRef.current = null;
+      }
+      return;
+    }
+    slideshowTimerRef.current = setInterval(nextSlide, 5000);
+    return () => {
+      if (slideshowTimerRef.current) {
+        clearInterval(slideshowTimerRef.current);
+        slideshowTimerRef.current = null;
+      }
+    };
+  }, [slideshowActive, slideshowPaused]);
+
+  useEffect(() => {
+    if (!slideshowActive) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') stopSlideshow();
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextSlide(); }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); prevSlide(); }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [slideshowActive]);
+
   const lightboxRef = useRef<HTMLDivElement>(null);
   const swipeStartX = useRef<number | null>(null);
 
@@ -295,7 +358,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     <div dir="rtl" className="min-h-[100dvh] bg-[#0f0f1a] text-white flex flex-col font-sans">
       <header className="sticky top-0 z-30 backdrop-blur-xl bg-[#0f0f1a]/95 border-b border-white/5 px-4 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <button
+          <button type="button"
             onClick={onBackToHome}
             className="p-2 bg-white/5 hover:bg-white/15 rounded-xl text-white transition-all cursor-pointer border border-white/5"
           >
@@ -309,13 +372,13 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
         <div className="flex items-center gap-2">
           {selectMode ? (
             <>
-              <button
+              <button type="button"
                 onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}
                 className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5"
               >
                 
               </button>
-              <button
+              <button type="button"
                 onClick={selectAllVisible}
                 className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5 flex items-center gap-1.5"
               >
@@ -323,14 +386,14 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                 
               </button>
               {selectedIds.size > 0 && (
-                <button
+                <button type="button"
                   onClick={deselectAll}
                   className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5"
                 >
                   
                 </button>
               )}
-              <button
+              <button type="button"
                 onClick={handleDownloadSelected}
                 disabled={selectedIds.size === 0}
                 className="text-[11px] px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5"
@@ -341,19 +404,25 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
             </>
           ) : (
             <>
-              <button
+              <button type="button"
                 onClick={() => setSelectMode(true)}
                 className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5 flex items-center gap-1.5"
               >
                 <CheckSquare className="w-3.5 h-3.5" />
                 
               </button>
-              <button
+              <button type="button"
                 onClick={handleDownloadAll}
                 className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-400 transition-all cursor-pointer border border-white/5"
                 title=" "
               >
                 <DownloadCloud className="w-3.5 h-3.5" />
+              </button>
+              <button type="button"
+                onClick={() => startSlideshow(0)}
+                className="text-[11px] px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 rounded-lg text-rose-300 transition-all cursor-pointer border border-rose-500/30 flex items-center gap-1.5"
+              >
+                ▶ Slideshow
               </button>
             </>
           )}
@@ -361,7 +430,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
       </header>
 
       <div className="px-4 py-2 flex gap-1.5 overflow-x-auto scrollbar-none border-b border-white/5">
-        <button
+        <button type="button"
           onClick={() => { setCurrentGroupTab("all"); setFilterTab("all"); }}
           className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
             currentGroupTab === "all"
@@ -371,7 +440,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
         >
            ({mediaItems.length})
         </button>
-        <button
+        <button type="button"
           onClick={runFaceGrouping}
           disabled={faceGrouping}
           className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
@@ -387,7 +456,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
           )}
           {faceGrouping ? "  ..." : " "}
         </button>
-        <button
+        <button type="button"
           onClick={() => { setCurrentGroupTab("filter"); setFilterTab("all"); }}
           className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
             currentGroupTab === "filter"
@@ -403,7 +472,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
       {currentGroupTab === "faces" && faceGroupActive && (
         <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto scrollbar-none">
           {faceGroups.map((g, i) => (
-            <button
+            <button type="button"
               key={i}
               onClick={() => setActiveFaceGroup(i)}
               className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
@@ -421,7 +490,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
       {currentGroupTab === "filter" && (
         <div className="px-4 pb-2 space-y-2">
           <div className="flex gap-1.5 overflow-x-auto scrollbar-none">
-            <button
+            <button type="button"
               onClick={() => setFilterTab("all")}
               className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
                 filterTab === "all"
@@ -432,7 +501,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               
             </button>
             {allFilters.map(f => (
-              <button
+              <button type="button"
                 key={f}
                 onClick={() => setFilterTab(f)}
                 className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
@@ -457,7 +526,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                 className="text-[10px] bg-white/5 border border-white/10 rounded-full px-6 py-1.5 text-white placeholder-slate-600 outline-none w-[130px] focus:border-amber-500/30"
               />
             </div>
-            <button
+            <button type="button"
               onClick={() => setContentFilter("all")}
               className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
                 contentFilter === "all" ? "bg-sky-500/15 border-sky-500/30 text-sky-300" : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
@@ -465,7 +534,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
             >
               
             </button>
-            <button
+            <button type="button"
               onClick={() => setContentFilter("photos")}
               className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
                 contentFilter === "photos" ? "bg-sky-500/15 border-sky-500/30 text-sky-300" : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
@@ -474,7 +543,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               <Image className="w-3 h-3 inline ml-0.5" />
               
             </button>
-            <button
+            <button type="button"
               onClick={() => setContentFilter("videos")}
               className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
                 contentFilter === "videos" ? "bg-sky-500/15 border-sky-500/30 text-sky-300" : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
@@ -483,7 +552,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               <Video className="w-3 h-3 inline ml-0.5" />
               
             </button>
-            <button
+            <button type="button"
               onClick={() => setContentFilter("most-liked")}
               className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
                 contentFilter === "most-liked" ? "bg-rose-500/15 border-rose-500/30 text-rose-300" : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
@@ -497,7 +566,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
           {searchGuest && (
             <div className="flex gap-1 overflow-x-auto scrollbar-none">
               {allGuests.filter(g => g.toLowerCase().includes(searchGuest.toLowerCase())).slice(0, 10).map(g => (
-                <button
+                <button type="button"
                   key={g}
                   onClick={() => setSearchGuest(g)}
                   className="text-[9px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400 hover:text-white cursor-pointer whitespace-nowrap"
@@ -637,7 +706,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
 
           <div className="flex-1 flex items-center justify-center relative" onClick={e => e.stopPropagation()}>
             {displayedItems.length > 1 && (
-              <button
+              <button type="button"
                 onClick={() => navigateLightbox(-1)}
                 className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
               >
@@ -664,7 +733,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               )}
             </div>
             {displayedItems.length > 1 && (
-              <button
+              <button type="button"
                 onClick={() => navigateLightbox(1)}
                 className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
               >
@@ -680,6 +749,45 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
             <span className="text-white/70 text-xs">
               {selectedIdx + 1}  {displayedItems.length}
             </span>
+          </div>
+        </div>
+      )}
+
+      {/* Full-screen Slideshow */}
+      {slideshowActive && (
+        <div className="fixed inset-0 z-[60] bg-black flex items-center justify-center" dir="ltr">
+          {/* Current slide */}
+          <div className="relative w-full h-full flex items-center justify-center" onClick={toggleSlideshowPause}>
+            {displayedItems[slideshowIndex]?.type === 'video' ? (
+              <video src={displayedItems[slideshowIndex]?.url} className="max-w-full max-h-full object-contain" autoPlay loop muted />
+            ) : (
+              <img
+                key={slideshowIndex}
+                src={displayedItems[slideshowIndex]?.url}
+                className="max-w-full max-h-full object-contain animate-fade-in"
+              />
+            )}
+            {/* Paused indicator */}
+            {slideshowPaused && (
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/60 rounded-full p-4">
+                <svg className="w-16 h-16 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
+              </div>
+            )}
+          </div>
+
+          {/* Bottom controls bar */}
+          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-6 pt-12 flex items-center justify-center gap-6">
+            <button type="button" onClick={prevSlide} className="text-white/80 hover:text-white p-2"><svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd"/></svg></button>
+            <button type="button" onClick={toggleSlideshowPause} className="text-white/80 hover:text-white p-2">
+              {slideshowPaused ? (
+                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"/></svg>
+              ) : (
+                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
+              )}
+            </button>
+            <button type="button" onClick={nextSlide} className="text-white/80 hover:text-white p-2"><svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/></svg></button>
+            <span className="text-white/60 text-sm absolute right-6">{slideshowIndex + 1} / {displayedItems.length}</span>
+            <button type="button" onClick={stopSlideshow} className="absolute top-4 right-4 text-white/60 hover:text-white p-2"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>
           </div>
         </div>
       )}

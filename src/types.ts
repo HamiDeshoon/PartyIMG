@@ -15,6 +15,8 @@ export interface EventConfig {
   saveDirectory: string;    // On-server save directory. Defaults to "./uploads"
   localSyncHost: string;    // Configured local receiver IP/port (e.g., "http://localhost:8080")
   localSyncEnabled: boolean;// Enable automated forwarding to user's real local machine
+  coverImage?: string;
+  couplePhoto?: string;
 }
 
 export interface MediaItem {

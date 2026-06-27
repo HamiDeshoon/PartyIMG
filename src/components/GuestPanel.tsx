@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
-  Camera, Video, User, Plus, Sparkles, Heart, Image,
-  Lock, Unlock, RotateCw, Play, Square, Check, AlertCircle, Loader, ArrowLeft, Trash2, WifiOff,
+  Camera, Video, User, Sparkles, Heart, Image,
+  Lock, Unlock, Check, AlertCircle, Loader, ArrowLeft, Trash2, WifiOff,
   ChevronLeft, ChevronRight, Download
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -41,9 +41,6 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
   const [selectedFilter, setSelectedFilter] = useState<FilterPreset>(FILM_FILTERS[0]);
 
-  const [captureMode, setCaptureMode] = useState<"upload" | "camera">("upload");
-  const [showNativeFallback, setShowNativeFallback] = useState(false);
-  const nativeCameraRef = useRef<HTMLInputElement | null>(null);
   const [uploadProgress, setUploadProgress] = useState(false);
   const [uploadStatusMsg, setUploadStatusMsg] = useState("");
   const [uploadPercent, setUploadPercent] = useState(0);
@@ -54,12 +51,10 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
 
-  const [showFilterOverview, setShowFilterOverview] = useState(false);
-  const [cameraSnapshot, setCameraSnapshot] = useState<string | null>(null);
-
   const [demoMode, setDemoMode] = useState(false);
   const [demoImg, setDemoImg] = useState("wedding");
   const [showOriginal, setShowOriginal] = useState(false);
+  const [downloadingMyPhotos, setDownloadingMyPhotos] = useState(false);
 
   const [likedMedia, setLikedMedia] = useState<Set<string>>(() => {
     try {
@@ -80,17 +75,6 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
       window.removeEventListener('offline', handleOffline);
     };
   }, []);
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [cameraError, setCameraError] = useState("");
-  const [cameraFlash, setCameraFlash] = useState(false);
-
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordTimer, setRecordTimer] = useState(0);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
-  const recordIntervalRef = useRef<any>(null);
 
   const [snappedCount, setSnappedCount] = useState(0);
   const [videoCount, setVideoCount] = useState(0);
@@ -161,8 +145,6 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   useEffect(() => {
     loadEventAndMedia();
     return () => {
-      stopCamera();
-      setShowNativeFallback(false);
       if (localFilePreview && previewFileType === "video") {
         URL.revokeObjectURL(localFilePreview);
       }
@@ -189,86 +171,6 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     localStorage.removeItem(`guest_name_${eventId}`);
     setIsRegistered(false);
     setGuestName("");
-    stopCamera();
-    setShowNativeFallback(false);
-    setCaptureMode("upload");
-  };
-
-  const startCamera = async () => {
-    setCameraError("");
-    setShowNativeFallback(false);
-
-    // Most mobile browsers (iOS Safari, Chrome on HTTP) block getUserMedia without a secure context
-    if (!window.isSecureContext) {
-      setCameraError("مرورگر شما به HTTPS نیاز دارد. لطفاً از دوربین بومی گوشی استفاده کنید.");
-      setShowNativeFallback(true);
-      setCaptureMode("camera");
-      return;
-    }
-
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } },
-        audio: true
-      });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-      }
-      setCaptureMode("camera");
-    } catch (err: any) {
-      console.warn("Camera init error:", err);
-      // Permission denied or not found — route to native camera immediately
-      if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') {
-        setCameraError("دسترسی به دوربین زنده امکان‌پذیر نیست. لطفاً از دوربین بومی گوشی استفاده کنید.");
-        setShowNativeFallback(true);
-        setCaptureMode("camera");
-        return;
-      }
-      // Other errors: try video-only stream as last resort
-      try {
-        const videoOnlyStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }
-        });
-        setStream(videoOnlyStream);
-        if (videoRef.current) {
-          videoRef.current.srcObject = videoOnlyStream;
-        }
-        setCaptureMode("camera");
-      } catch (fallbackErr: any) {
-        setCameraError("دسترسی به دوربین زنده امکان‌پذیر نیست. لطفاً از دوربین بومی گوشی استفاده کنید.");
-        setShowNativeFallback(true);
-        setCaptureMode("camera");
-      }
-    }
-  };
-
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-      setStream(null);
-    }
-    if (isRecording) {
-      clearInterval(recordIntervalRef.current);
-      setIsRecording(false);
-      setRecordTimer(0);
-    }
-  };
-
-  const toggleFilterGrid = () => {
-    if (!showFilterOverview && videoRef.current) {
-      const canvas = window.document.createElement("canvas");
-      canvas.width = 160;
-      canvas.height = 120;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        setCameraSnapshot(canvas.toDataURL("image/jpeg", 0.5));
-      }
-      setShowFilterOverview(true);
-    } else {
-      setShowFilterOverview(false);
-    }
   };
 
   const applyFilterToImage = (imageSrc: string): Promise<string> => {
@@ -303,110 +205,9 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     });
   };
 
-  const snapLivePhoto = async () => {
-    if (!videoRef.current) return;
-
-    setCameraFlash(true);
-    setTimeout(() => setCameraFlash(false), 200);
-
-    const canvas = window.document.createElement("canvas");
-    canvas.width = videoRef.current.videoWidth || 1920;
-    canvas.height = videoRef.current.videoHeight || 1080;
-    const ctx = canvas.getContext("2d");
-
-    if (ctx) {
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const rawBase64 = canvas.toDataURL("image/jpeg", 1.0);
-
-      setUploadProgress(true);
-      setUploadStatusMsg("Baking negatives...");
-      const filteredBase64 = await applyFilterToImage(rawBase64);
-
-      const success = await handleStreamingUpload(filteredBase64, "photo");
-      if (success) {
-        setUploadStatusMsg("با موفقیت ثبت شد!");
-        setTimeout(() => setUploadProgress(false), 1000);
-      } else {
-        setUploadProgress(false);
-      }
-    }
-  };
-
-  const startRecordingVideo = () => {
-    if (!stream) return;
-    recordedChunksRef.current = [];
-    const options = { mimeType: "video/webm;codecs=vp9" };
-    let mediaRecorder: MediaRecorder;
-
-    try {
-      mediaRecorder = new MediaRecorder(stream, options);
-    } catch (e) {
-      try {
-        mediaRecorder = new MediaRecorder(stream);
-      } catch (err: any) {
-        toast.error("Video recording formats not supported on this mobile user agent.");
-        return;
-      }
-    }
-
-    mediaRecorderRef.current = mediaRecorder;
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) {
-        recordedChunksRef.current.push(event.data);
-      }
-    };
-
-    mediaRecorder.onstop = async () => {
-      clearInterval(recordIntervalRef.current);
-      setUploadProgress(true);
-      setUploadStatusMsg("Assembling 30-second digital reel...");
-
-      const blob = new Blob(recordedChunksRef.current, { type: "video/mp4" });
-
-      const success = await handleStreamingUpload(blob, "video", recordTimer);
-      setRecordTimer(0);
-
-      if (success) {
-        setUploadStatusMsg("با موفقیت ثبت شد!");
-        setTimeout(() => setUploadProgress(false), 1000);
-      } else {
-        setUploadProgress(false);
-      }
-    };
-
-    mediaRecorder.start();
-    setIsRecording(true);
-    setRecordTimer(0);
-
-    recordIntervalRef.current = setInterval(() => {
-      setRecordTimer((prev) => {
-        const maxDuration = 300; // 5 minutes, unlimited for wedding moments
-        if (prev >= maxDuration - 1) {
-          mediaRecorder.stop();
-          setIsRecording(false);
-          clearInterval(recordIntervalRef.current);
-          return maxDuration;
-        }
-        return prev + 1;
-      });
-    }, 1000);
-  };
-
-  const stopRecordingVideo = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  };
-
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
-
-    if (files.some(f => f.size > 30 * 1024 * 1024)) {
-      toast.error("حجم یکی از فایل‌های انتخاب شده از سقف ۳۰ مگابایت بیشتر است.");
-      return;
-    }
 
     if (files.length > 1) {
       setPendingFiles(files);
@@ -438,6 +239,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     // Single file: show preview
     const file = files[0];
     const isVideo = file.type.startsWith("video");
+    e.target.value = '';
 
     if (isVideo) {
       setPreviewFileType("video");
@@ -459,31 +261,6 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
         console.error("Error loading preview", err);
       }
     }
-  };
-
-  // Bridge native phone camera capture into the existing filter preview pipeline
-  const handleNativeCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []) as File[];
-    if (files.length === 0) return;
-    e.target.value = '';
-    const file = files[0];
-    const isVideo = file.type.startsWith("video");
-    if (isVideo) {
-      setPreviewFileType("video");
-      const url = URL.createObjectURL(file);
-      setLocalFilePreview(url);
-      setPendingFile(file);
-    } else {
-      setPreviewFileType("photo");
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setLocalFilePreview(event.target?.result as string);
-        setPendingFile(file);
-      };
-      reader.readAsDataURL(file);
-    }
-    // Switch to upload mode so the existing preview/upload UI handles the rest
-    setCaptureMode("upload");
   };
 
   const handleUploadPendingFile = async () => {
@@ -575,6 +352,12 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
         method: "POST",
         body: formData
       });
+
+      if (res.status === 409) {
+        const errData = await res.json();
+        toast.warning("این فایل قبلاً آپلود شده است");
+        return false;
+      }
 
       if (!res.ok) {
         const errorData = await res.json();
@@ -678,6 +461,33 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     }
   };
 
+  const handleDownloadMyPhotos = async () => {
+    setDownloadingMyPhotos(true);
+    try {
+      const res = await fetch(`/api/events/${eventId}/download-my-photos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ guestName })
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        toast.error(err.error || "Failed to download");
+        return;
+      }
+      const blob = await res.blob();
+      const a = window.document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${eventId}-${guestName}-photos.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (err) {
+      console.error(err);
+      toast.error("Download failed");
+    } finally {
+      setDownloadingMyPhotos(false);
+    }
+  };
+
   const handleDownload = async (url: string, filename: string) => {
     try {
       const res = await fetch(url);
@@ -758,7 +568,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
               رویداد با کد <code className="bg-slate-900 px-1.5 py-0.5 rounded font-mono text-xs text-rose-400">#{eventId}</code> غیرفعال یا حذف شده است.
             </p>
           </div>
-          <button
+          <button type="button"
             onClick={onBackToHome}
             className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2 px-6 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1"
           >
@@ -779,9 +589,15 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
         </div>
       )}
 
-      <header className="backdrop-blur-md bg-white/5 border-b border-white/10 px-4 py-3 shrink-0 flex items-center justify-between shadow-md" id="guest_header">
-        <div className="flex items-center space-x-2.5 font-sans rtl:space-x-reverse">
-          <button
+      <header className="backdrop-blur-md bg-white/5 border-b border-white/10 px-4 py-3 shrink-0 flex items-center justify-between shadow-md relative overflow-hidden" id="guest_header">
+        {eventInfo.coverImage && (
+          <div className="absolute inset-0 z-0">
+            <img src={eventInfo.coverImage} className="w-full h-48 object-cover opacity-30" />
+            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#0f0f1a]" />
+          </div>
+        )}
+        <div className="flex items-center space-x-2.5 font-sans rtl:space-x-reverse relative z-10">
+          <button type="button"
             id="guest_back_btn"
             onClick={onBackToHome}
             className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-all cursor-pointer border border-white/10"
@@ -804,7 +620,11 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
             className="w-full max-w-sm backdrop-blur-2xl bg-slate-900/80 p-6 rounded-3xl border border-white/10 shadow-2xl space-y-6"
           >
             <div className="text-center space-y-2">
-              <Camera className="w-12 h-12 text-pink-400 mx-auto stroke-1 animate-float" />
+              {eventInfo.couplePhoto ? (
+                <img src={eventInfo.couplePhoto} className="w-24 h-24 rounded-full object-cover mx-auto border-2 border-rose-500/30" />
+              ) : (
+                <Camera className="w-12 h-12 text-pink-400 mx-auto stroke-1 animate-float" />
+              )}
               <h2 className="text-lg font-display font-medium text-white">ثبت لحظات رویداد</h2>
               <p className="text-xs text-slate-300 leading-relaxed font-sans">
                 {eventInfo.description || "با ثبت نام، عکس‌ها و ویدیوهای خود را مستقیما در آلبوم رویداد ذخیره کنید."}
@@ -858,120 +678,22 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
             <div className="flex items-center gap-4 text-slate-300">
               <span dir="ltr">📸 <strong className="text-pink-300 font-mono">{snappedCount}</strong></span>
               <span dir="ltr">🎥 <strong className="text-rose-400 font-mono">{videoCount}</strong></span>
+              <button
+                type="button"
+                onClick={handleDownloadMyPhotos}
+                disabled={downloadingMyPhotos}
+                className="text-[10px] px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-lg transition-all cursor-pointer disabled:opacity-40 flex items-center gap-1"
+              >
+                <Download className="w-3 h-3" />
+                {downloadingMyPhotos ? "..." : "دانلود عکس‌های من"}
+              </button>
             </div>
           </div>
 
           <div className="p-4" id="viewfinder_area">
             <div className="w-full max-w-sm mx-auto bg-slate-900/65 rounded-3xl overflow-hidden border border-white/15 shadow-2xl relative">
 
-              {captureMode === "camera" ? (
-                showNativeFallback ? (
-                  /* NATIVE CAMERA FALLBACK — shown when getUserMedia fails or context is not secure */
-                  <div className="relative aspect-[3/4] bg-black/40 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
-                    <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-rose-500/20">
-                      <Camera className="w-7 h-7 text-rose-400" />
-                    </div>
-                    <p className="text-sm font-semibold text-white mb-1">دوربین زنده در دسترس نیست</p>
-                    <p className="text-[11px] text-slate-400 leading-relaxed max-w-[240px] mx-auto mb-5">
-                      دسترسی به دوربین زنده امکان‌پذیر نیست. لطفاً از دوربین بومی گوشی استفاده کنید.
-                    </p>
-                    <label className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 active:scale-95 text-white text-xs font-bold px-6 py-3 rounded-xl cursor-pointer shadow-md transition-all inline-flex items-center gap-2">
-                      <Camera className="w-4 h-4" />
-                      باز کردن دوربین گوشی
-                      <input
-                        ref={nativeCameraRef}
-                        type="file"
-                        accept="image/*,video/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={handleNativeCapture}
-                      />
-                    </label>
-                    <p className="text-[9px] text-slate-500 mt-3">پس از عکس‌برداری، فیلترهای رنگی قابل اعمال است</p>
-                  </div>
-                ) : (
-                <div className="relative aspect-[3/4] bg-black overflow-hidden flex items-center justify-center">
-                  {/* Retro film frame overlay corners */}
-                  <div className="absolute inset-0 z-10 pointer-events-none">
-                    <div className="absolute top-0 left-0 w-8 h-8 border-t-2 border-l-2 border-rose-500/40 rounded-tl-lg" />
-                    <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-rose-500/40 rounded-tr-lg" />
-                    <div className="absolute bottom-0 left-0 w-8 h-8 border-b-2 border-l-2 border-rose-500/40 rounded-bl-lg" />
-                    <div className="absolute bottom-0 right-0 w-8 h-8 border-b-2 border-r-2 border-rose-500/40 rounded-br-lg" />
-                    <div className="absolute inset-3 border border-white/5 rounded-xl" />
-                  </div>
-
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    id="camera_video_feed"
-                    className="w-full h-full object-cover transition-all"
-                    style={{ filter: selectedFilter.cssStyle }}
-                  />
-
-                  {cameraFlash && (
-                    <div className="absolute inset-0 bg-white z-20 animate-flash-burst pointer-events-none" />
-                  )}
-
-                  {isRecording && (
-                    <div className="absolute top-4 right-4 z-10 bg-rose-600 border border-rose-500 py-1 px-3 rounded-full flex items-center gap-2 text-[11px] font-bold tracking-wide animate-pulse uppercase text-white" dir="ltr">
-                      <div className="w-2 h-2 rounded-full bg-white" />
-                      REC {recordTimer}s
-                    </div>
-                  )}
-
-                  <div className="absolute top-4 left-4 z-10 bg-slate-950/80 backdrop-blur-sm text-[10px] uppercase tracking-wider font-mono px-2 py-1 rounded border border-white/10">
-                    <span className="text-rose-300">{selectedFilter.name}</span>
-                  </div>
-
-                  <div className="absolute bottom-4 right-4 z-10">
-                    <button
-                      onClick={toggleFilterGrid}
-                      className="bg-black/60 hover:bg-black/80 backdrop-blur-md rounded-full p-2 border border-white/20 shadow-lg text-white transition-all cursor-pointer"
-                      title="Instant Filter Preview"
-                    >
-                      <Sparkles className="w-5 h-5 text-pink-400" />
-                    </button>
-                  </div>
-
-                  {showFilterOverview && cameraSnapshot && (
-                    <div className="absolute inset-0 bg-black/90 backdrop-blur-lg z-30 flex flex-col items-center justify-center p-4 animate-fade-in">
-                      <div className="absolute top-4 left-4">
-                        <button
-                          onClick={() => setShowFilterOverview(false)}
-                          className="text-white text-xs bg-white/10 px-3 py-1.5 rounded-lg border border-white/20 cursor-pointer"
-                        >
-                          بستن
-                        </button>
-                      </div>
-                      <h4 className="text-white text-sm mb-4 font-bold tracking-widest text-pink-300">انتخاب فیلتر</h4>
-                      <div className="grid grid-cols-3 gap-3 w-full h-[70%] overflow-y-auto pr-2 scrollbar-none">
-                        {FILM_FILTERS.map((f) => (
-                          <div
-                            key={f.id}
-                            onClick={() => { setSelectedFilter(f); setShowFilterOverview(false); }}
-                            className={`flex flex-col items-center gap-1.5 cursor-pointer rounded-lg p-1 transition-all ${
-                              selectedFilter.id === f.id ? "bg-white/20 border border-pink-400" : "hover:bg-white/10 border border-transparent"
-                            }`}
-                          >
-                            <img
-                              src={cameraSnapshot}
-                              alt={f.name}
-                              className="w-full aspect-[3/4] object-cover rounded shadow"
-                              style={{ filter: f.cssStyle }}
-                            />
-                            <span className="text-[10px] text-white font-mono uppercase truncate w-full text-center">{f.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                </div>
-                )
-              ) : (
-                localFilePreview ? (
+              {localFilePreview ? (
                   <div className="relative aspect-[3/4] bg-black overflow-hidden flex flex-col justify-between">
                     <div className="flex-1 w-full h-full relative overflow-hidden flex items-center justify-center bg-zinc-950">
                       {previewFileType === "video" ? (
@@ -998,14 +720,14 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                     </div>
 
                     <div className="absolute bottom-0 inset-x-0 bg-slate-950/85 backdrop-blur-md p-3 border-t border-white/10 flex items-center justify-between gap-2 z-10 font-sans">
-                      <button
+                      <button type="button"
                         onClick={handleCancelPendingFile}
                         className="bg-transparent hover:bg-white/10 border border-white/20 text-slate-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all shrink-0"
                       >
                         لغو انتخاب
                       </button>
 
-                      <button
+                      <button type="button"
                         onClick={handleUploadPendingFile}
                         className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer transition-all"
                       >
@@ -1041,12 +763,12 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                       <div className="flex w-full justify-between items-center px-1">
                          <span className="text-xs text-slate-400">تغییر نمونه دمو:</span>
                          <div className="flex gap-2">
-                           <button onClick={() => setDemoImg("portrait")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "portrait" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>پرتره</button>
-                           <button onClick={() => setDemoImg("wedding")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "wedding" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>عروسی</button>
-                           <button onClick={() => setDemoImg("landscape")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "landscape" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>منظره</button>
+                            <button type="button" onClick={() => setDemoImg("portrait")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "portrait" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>پرتره</button>
+                            <button type="button" onClick={() => setDemoImg("wedding")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "wedding" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>عروسی</button>
+                            <button type="button" onClick={() => setDemoImg("landscape")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "landscape" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>منظره</button>
                          </div>
                       </div>
-                      <button
+                      <button type="button"
                         onClick={() => setDemoMode(false)}
                         className="w-full bg-transparent hover:bg-white/10 border border-white/20 text-slate-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all shrink-0"
                       >
@@ -1077,7 +799,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                           />
                         </label>
 
-                        <button
+                        <button type="button"
                           onClick={() => setDemoMode(true)}
                           className="bg-white/10 hover:bg-white/20 active:scale-95 text-white text-[11px] font-semibold px-5 py-2.5 rounded-xl cursor-pointer border border-white/10 transition-all flex items-center justify-center gap-1"
                         >
@@ -1088,7 +810,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                     </div>
                   </div>
                 )
-              )}
+              }
 
               {uploadProgress && (
                 <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center z-30 text-white select-none">
@@ -1111,132 +833,18 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                 </div>
               )}
 
-              <div className="bg-black/50 border-t border-white/15 p-4 shrink-0 flex items-center justify-between gap-2.5" id="shooter_controls_bar">
-                {captureMode === "camera" ? (
-                  showNativeFallback ? (
-                    /* NATIVE FALLBACK CONTROLS — no live stream, offer native camera + close */
-                    <>
-                      <button
-                        onClick={() => {
-                          stopCamera();
-                          setShowNativeFallback(false);
-                          setCaptureMode("upload");
-                        }}
-                        className="p-3 bg-white/10 hover:bg-white/15 text-slate-200 hover:text-white rounded-full transition-all font-sans text-xs flex items-center gap-1 cursor-pointer border border-white/10"
-                        title="بارگذاری از گالری"
-                      >
-                        <Image className="w-4 h-4 ml-1" />
-                        فایل‌ها
-                      </button>
-
-                      <label className="p-3 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 hover:text-rose-200 rounded-full transition-all font-sans text-xs flex items-center gap-1 cursor-pointer border border-rose-500/30">
-                        <Camera className="w-4 h-4 ml-1" />
-                        دوربین بومی
-                        <input
-                          type="file"
-                          accept="image/*,video/*"
-                          capture="environment"
-                          className="hidden"
-                          onChange={handleNativeCapture}
-                        />
-                      </label>
-
-                      <button
-                        onClick={() => {
-                          stopCamera();
-                          setShowNativeFallback(false);
-                          setCaptureMode("upload");
-                        }}
-                        className="p-2.5 bg-slate-800 hover:bg-red-955/20 text-red-400 rounded-full transition-colors font-sans text-xs cursor-pointer px-4"
-                        title="بستن"
-                      >
-                        بستن
-                      </button>
-                    </>
-                  ) : (
-                    /* LIVE CAMERA CONTROLS — recording + shutter + close */
-                    <>
-                      <button
-                        onClick={() => {
-                          stopCamera();
-                          setCaptureMode("upload");
-                        }}
-                        className="p-3 bg-white/10 hover:bg-white/15 text-slate-200 hover:text-white rounded-full transition-all font-sans text-xs flex items-center gap-1 cursor-pointer border border-white/10"
-                        title="بارگذاری از گالری"
-                      >
-                        <Image className="w-4 h-4 ml-1" />
-                        فایل‌ها
-                      </button>
-
-                      <div className="flex items-center space-x-4 rtl:space-x-reverse">
-                        {isRecording ? (
-                          <button
-                            onClick={stopRecordingVideo}
-                            className="bg-red-600 hover:bg-red-750 w-14 h-14 rounded-full flex items-center justify-center border-4 border-slate-900 text-white shadow-lg active:scale-90 transition-all cursor-pointer"
-                            title="توقف ضبط ویدیو"
-                          >
-                            <Square className="w-5 h-5 animate-pulse text-white fill-white" />
-                          </button>
-                        ) : (
-                          <button
-                            onClick={startRecordingVideo}
-                            className="bg-red-650 hover:bg-red-600 w-12 h-12 rounded-full flex items-center justify-center border-2 border-slate-800 text-white shadow-md active:scale-90 transition-all cursor-pointer"
-                            title="ضبط ویدیوی کوتاه"
-                          >
-                            <Video className="w-4 h-4 text-white" />
-                          </button>
-                        )}
-
-                        <motion.button
-                          onClick={snapLivePhoto}
-                          disabled={isRecording}
-                          whileTap={{ scale: 0.85 }}
-                          className="bg-white hover:bg-slate-100 disabled:opacity-40 w-14 h-14 rounded-full flex items-center justify-center border-4 border-slate-800 shadow-xl active:scale-90 transition-transform shrink-0 cursor-pointer"
-                          title="ثبت عکس"
-                        >
-                          <div className="w-10 h-10 rounded-full bg-slate-900 text-white flex items-center justify-center">
-                            📸
-                          </div>
-                        </motion.button>
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          stopCamera();
-                          setCaptureMode("upload");
-                        }}
-                        className="p-2.5 bg-slate-800 hover:bg-red-955/20 text-red-400 rounded-full transition-colors font-sans text-xs cursor-pointer px-4"
-                        title="بستن دوربین"
-                      >
-                        بستن
-                      </button>
-                    </>
-                  )
-                ) : (
-                  /* UPLOAD MODE CONTROLS — live camera + native camera options */
-                  <div className="flex items-center gap-2 w-full justify-center">
-                    <button
-                      onClick={startCamera}
-                      className="p-3 bg-pink-500/10 hover:bg-pink-500/20 text-pink-300 hover:text-pink-200 rounded-full transition-all font-sans text-xs flex items-center gap-1 cursor-pointer border border-pink-500/20"
-                      title="باز کردن دوربین زنده"
-                    >
-                      <Camera className="w-4 h-4 animate-pulse ml-1" />
-                      دوربین زنده
-                    </button>
-
-                    <label className="p-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 rounded-full transition-all font-sans text-xs flex items-center gap-1 cursor-pointer border border-amber-500/20">
-                      <Camera className="w-4 h-4 ml-1" />
-                      دوربین بومی
-                      <input
-                        type="file"
-                        accept="image/*,video/*"
-                        capture="environment"
-                        className="hidden"
-                        onChange={handleNativeCapture}
-                      />
-                    </label>
-                  </div>
-                )}
+              <div className="bg-black/50 border-t border-white/15 p-4 shrink-0 flex items-center justify-center gap-2.5" id="shooter_controls_bar">
+                <label className="p-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 rounded-full transition-all font-sans text-xs flex items-center gap-1 cursor-pointer border border-amber-500/20">
+                  <Camera className="w-4 h-4 ml-1" />
+                  دوربین بومی
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    capture="environment"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                </label>
               </div>
             </div>
           </div>
@@ -1410,7 +1018,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
                     {hasMoreMedia && mediaItems.length > 0 && (
                       <div className="pt-8 pb-4 flex justify-center">
-                        <button
+                        <button type="button"
                           onClick={loadMoreMedia}
                           disabled={isLoadingMore}
                           className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 py-2.5 rounded-full text-xs font-semibold text-slate-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
@@ -1457,7 +1065,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                 </p>
               </div>
 
-              <button
+              <button type="button"
                 onClick={() => setActiveLightboxIndex(null)}
                 className="bg-white/10 hover:bg-white/20 border border-white/10 text-white font-bold text-xs px-3 py-1.5 rounded-xl cursor-pointer transition-all"
               >
@@ -1495,7 +1103,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
               {mediaItems.length > 1 && (
                 <>
-                  <button
+                  <button type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       navigateLightbox(-1);
@@ -1504,7 +1112,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                   >
                     <ChevronRight className="w-5 h-5" />
                   </button>
-                  <button
+                  <button type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       navigateLightbox(1);
@@ -1518,7 +1126,7 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
             </div>
 
             <div className="flex items-center justify-between py-4 cursor-default select-none" onClick={(e) => e.stopPropagation()}>
-              <button
+              <button type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   const m = mediaItems[activeLightboxIndex!];

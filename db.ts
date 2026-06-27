@@ -71,9 +71,24 @@ export async function initDb(): Promise<Database> {
     }
   } catch (e) {}
   try {
+    const tableInfo = await dbInstance.all("PRAGMA table_info(events)");
+    if (!tableInfo.find((c: any) => c.name === 'coverImage')) {
+      await dbInstance.exec('ALTER TABLE events ADD COLUMN coverImage TEXT;');
+    }
+    if (!tableInfo.find((c: any) => c.name === 'couplePhoto')) {
+      await dbInstance.exec('ALTER TABLE events ADD COLUMN couplePhoto TEXT;');
+    }
+  } catch (e) {}
+  try {
     const tableInfo = await dbInstance.all("PRAGMA table_info(admins)");
     if (!tableInfo.find(c => c.name === 'isSuperuser')) {
       await dbInstance.exec('ALTER TABLE admins ADD COLUMN isSuperuser BOOLEAN DEFAULT 0;');
+    }
+  } catch (e) {}
+  try {
+    const mediaTableInfo = await dbInstance.all("PRAGMA table_info(media)");
+    if (!mediaTableInfo.find((c: any) => c.name === 'fileHash')) {
+      await dbInstance.exec('ALTER TABLE media ADD COLUMN fileHash TEXT;');
     }
   } catch (e) {}
 
@@ -151,7 +166,7 @@ export async function getEventById(id: string) {
 export async function createOrUpdateEvent(eventData: any) {
   const db = await getDb();
   
-  const ALLOWED_EVENT_FIELDS = ['id', 'name', 'hostName', 'description', 'date', 'revealStyle', 'isRevealed', 'imageLimit', 'videoLimit', 'maxVideoDuration', 'saveDirectory', 'localSyncHost', 'localSyncEnabled', 'createdAt', 'adminId'];
+  const ALLOWED_EVENT_FIELDS = ['id', 'name', 'hostName', 'description', 'date', 'revealStyle', 'isRevealed', 'imageLimit', 'videoLimit', 'maxVideoDuration', 'saveDirectory', 'localSyncHost', 'localSyncEnabled', 'createdAt', 'adminId', 'coverImage', 'couplePhoto'];
   const cleanData: any = {};
   for (const field of ALLOWED_EVENT_FIELDS) {
     if (eventData[field] !== undefined) {
@@ -183,6 +198,11 @@ export async function deleteEvent(id: string) {
   await db.run('DELETE FROM events WHERE id = ?', id);
 }
 
+export async function findDuplicateMedia(eventId: string, fileHash: string): Promise<any | null> {
+  const db = await getDb();
+  return db.get('SELECT * FROM media WHERE eventId = ? AND fileHash = ?', [eventId, fileHash]);
+}
+
 export async function getEventMedia(eventId: string, limit: number = 50, offset: number = 0) {
   const db = await getDb();
   return await db.all('SELECT * FROM media WHERE eventId = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?', [eventId, limit, offset]);
@@ -190,7 +210,7 @@ export async function getEventMedia(eventId: string, limit: number = 50, offset:
 
 export async function createMedia(mediaItem: any) {
   const db = await getDb();
-  const ALLOWED_MEDIA_FIELDS = ['id', 'eventId', 'type', 'url', 'thumbnailUrl', 'guestName', 'filter', 'timestamp', 'likes', 'duration', 'fileSize', 'systemSavePath', 'mimeType'];
+  const ALLOWED_MEDIA_FIELDS = ['id', 'eventId', 'type', 'url', 'thumbnailUrl', 'guestName', 'filter', 'timestamp', 'likes', 'duration', 'fileSize', 'systemSavePath', 'mimeType', 'fileHash'];
   const cleanData: any = {};
   for (const field of ALLOWED_MEDIA_FIELDS) {
     if (mediaItem[field] !== undefined) {

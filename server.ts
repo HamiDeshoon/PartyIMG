@@ -5,6 +5,7 @@ import https from "https";
 import http from "http";
 import { createServer as createViteServer } from "vite";
 import { fileURLToPath } from "url";
+import { WebSocketServer, WebSocket } from "ws";
 import multer from "multer";
 import { v4 as uuidv4 } from "uuid";
 import helmet from "helmet";
@@ -39,7 +40,18 @@ function validateEnv() {
 validateEnv();
 
 const app = express();
-const PORT = 3000;
+let wss: WebSocketServer;
+const PORT = parseInt(process.env.PORT) || 3000;
+
+function broadcastEvent(eventType: string, data: any) {
+  if (!wss) return;
+  const message = JSON.stringify({ type: eventType, data });
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
+}
 
 // Storage abstraction
 const storageProvider = getStorageProvider();
@@ -50,15 +62,20 @@ async function setupAdmin() {
   const sqlite = await db.getDb();
   const username = process.env.ADMIN_USERNAME || 'Theomainie';
   const password = process.env.ADMIN_PASSWORD || '19981998';
-  const hash = await bcrypt.hash(password, 10);
   
   const admin = await sqlite.get('SELECT * FROM admins WHERE username = ?', username);
   if (!admin) {
+    const hash = await bcrypt.hash(password, 10);
     await sqlite.run('INSERT INTO admins (id, username, passwordHash, isSuperuser) VALUES (?, ?, ?, 1)', uuidv4(), username, hash);
     logger.info(`Superuser admin created. Login with username: ${username}`);
   } else {
-    // Sync password from environment variable
-    await sqlite.run('UPDATE admins SET passwordHash = ?, isSuperuser = 1 WHERE username = ?', hash, username);
+    // Only re-hash if password actually changed
+    const match = await bcrypt.compare(password, admin.passwordHash);
+    if (!match) {
+      const hash = await bcrypt.hash(password, 10);
+      await sqlite.run('UPDATE admins SET passwordHash = ?, isSuperuser = 1 WHERE username = ?', hash, username);
+      logger.info(`Admin password updated for: ${username}`);
+    }
   }
 }
 
@@ -77,7 +94,7 @@ async function setupWeddingEvent() {
       isRevealed: true,
       imageLimit: 0,
       videoLimit: 0,
-      maxVideoDuration: 30,
+      maxVideoDuration: 0,
       saveDirectory: "./uploads",
       localSyncHost: "http://localhost:8080",
       localSyncEnabled: false
@@ -177,7 +194,7 @@ const storage = multer.diskStorage({
 });
 const uploadParams = multer({
   storage,
-  limits: { fileSize: 200 * 1024 * 1024 },
+  limits: { fileSize: 2048 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/heic', 'video/mp4', 'video/quicktime'];
     if (allowed.includes(file.mimetype)) {
@@ -338,26 +355,61 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
     const filter = req.body.filter || "none";
     const duration = parseInt(req.body.duration) || 0;
 
-    if (type === 'photo' && req.file.size > 20 * 1024 * 1024) {
+    // Compute file hash for duplicate detection
+    const crypto = await import("crypto");
+    const fileBuffer = fs.readFileSync(req.file.path);
+    const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+    // Check for duplicate in same event
+    const existingDuplicate = await db.findDuplicateMedia(eventId, fileHash);
+    if (existingDuplicate) {
       if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-      return res.status(400).json({ error: "Photo exceeds 20MB limit." });
+      return res.status(409).json({
+        error: "Duplicate file detected",
+        existingId: existingDuplicate.id,
+        existingMedia: existingDuplicate
+      });
     }
 
     let thumbnailUrl;
-    if (type === 'photo') {
-      try {
+    try {
+      if (type === 'photo') {
         const thumbBuffer = await sharp(req.file.path)
+          .rotate()
           .resize({ width: 600, withoutEnlargement: true })
           .webp({ quality: 80 })
           .toBuffer();
-          
         const thumbSave = await storageProvider.saveFile(
             null, eventId, type, `thumb-${req.file.originalname}.webp`, thumbBuffer, event.saveDirectory || undefined
         );
         thumbnailUrl = thumbSave.url;
-      } catch (err) {
-        logger.error("Failed to generate thumbnail: " + err);
+      } else if (type === 'video') {
+        const thumbFilename = `thumb-${req.file.originalname || 'video'}-${Date.now()}.jpg`;
+        const thumbOutput = path.join(path.dirname(req.file.path), thumbFilename);
+        const ffmpeg = (await import("fluent-ffmpeg")).default;
+        await new Promise<void>((resolve, reject) => {
+          ffmpeg(req.file.path)
+            .on('end', () => resolve())
+            .on('error', (err: any) => reject(err))
+            .screenshots({
+              count: 1,
+              timemarks: ['1'],
+              filename: thumbFilename,
+              folder: path.dirname(req.file.path),
+              size: '600x?'
+            });
+        });
+        if (fs.existsSync(thumbOutput)) {
+          const thumbBuffer = fs.readFileSync(thumbOutput);
+          const thumbSave = await storageProvider.saveFile(
+              null, eventId, type, `thumb-${path.basename(req.file.originalname || 'video')}.jpg`, thumbBuffer, event.saveDirectory || undefined
+          );
+          thumbnailUrl = thumbSave.url;
+          fs.unlinkSync(thumbOutput);
+        }
       }
+    } catch (err) {
+      logger.error("Failed to generate thumbnail: " + err);
     }
 
     const { url: publicUrl, systemSavePath } = await storageProvider.saveFile(
@@ -384,11 +436,13 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
       duration,
       fileSize: req.file.size,
       systemSavePath,
-      mimeType: req.file.mimetype
+      mimeType: req.file.mimetype,
+      fileHash
     };
 
     await db.createMedia(mediaItem);
     res.json(mediaItem);
+    broadcastEvent('media:uploaded', { eventId, media: mediaItem });
   } catch (err: any) {
     if (err.message && err.message.includes('Invalid file type')) return res.status(400).json({ error: err.message });
     next(err);
@@ -415,6 +469,7 @@ app.delete("/api/events/:eventId/media/:mediaId", async (req: any, res: any, nex
     await storageProvider.deleteFile(media.url, media.systemSavePath, eventId, media.type);
     
     res.json({ success: true });
+    broadcastEvent('media:deleted', { mediaId, eventId });
   } catch (err) { next(err); }
 });
 
@@ -422,6 +477,62 @@ app.post("/api/events/:eventId/media/:mediaId/like", async (req, res, next) => {
   try {
     const media = await db.likeMedia(req.params.mediaId);
     res.json(media);
+    broadcastEvent('media:liked', { mediaId: req.params.mediaId, eventId: req.params.eventId, media });
+  } catch(err) { next(err); }
+});
+
+app.post("/api/events/:eventId/download-my-photos", async (req: any, res: any, next: any) => {
+  try {
+    const { eventId } = req.params;
+    const { guestName } = req.body;
+    if (!guestName) return res.status(400).json({ error: "Guest name required" });
+
+    const event = await db.getEventById(eventId);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+
+    const sqlite = await db.getDb();
+    const medias = await sqlite.all(
+      'SELECT * FROM media WHERE eventId = ? AND guestName = ? ORDER BY timestamp DESC',
+      [eventId, guestName]
+    );
+    if (!medias.length) return res.status(400).json({ error: 'No media found for this guest' });
+
+    res.attachment(`${event.name}_${guestName}_Photos.zip`);
+    const archiverModule = await import("archiver");
+    // @ts-ignore
+    const archiver = archiverModule.default || archiverModule;
+    const archive = archiver('zip', { zlib: { level: 9 } } as any);
+    archive.pipe(res);
+
+    for (const m of medias) {
+      const fileStream = storageProvider.getFileStream(m.systemSavePath);
+      if (fileStream) {
+        archive.append(fileStream, { name: `${m.id}.${m.type === 'video' ? 'mp4' : 'jpg'}` });
+      }
+    }
+    await archive.finalize();
+  } catch (err) { next(err); }
+});
+
+app.post("/api/events/:id/upload/event-image", requireAdmin, uploadParams.single('fileData'), async (req, res, next) => {
+  try {
+    const event = await db.getEventById(req.params.id);
+    if (!event) return res.status(404).json({ error: "Event not found" });
+
+    const imageType = req.body.imageType;
+    if (!imageType || !['coverImage', 'couplePhoto'].includes(imageType)) {
+      return res.status(400).json({ error: "Invalid imageType" });
+    }
+
+    const { url: publicUrl } = await storageProvider.saveFile(
+      req.file, req.params.id, 'photo', `event-${imageType}${path.extname(req.file.originalname)}`,
+      undefined, event.saveDirectory || undefined
+    );
+
+    await db.createOrUpdateEvent({ id: req.params.id, [imageType]: publicUrl });
+
+    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+    res.json({ url: publicUrl });
   } catch(err) { next(err); }
 });
 
@@ -498,6 +609,8 @@ async function startServer() {
     httpsServer.listen(443, "0.0.0.0", () => {
       logger.info(`>>> HTTPS Server active on port 443 <<<`);
     });
+    wss = new WebSocketServer({ server: httpsServer });
+    logger.info("WebSocket server initialized (TLS)");
 
     const httpApp = express();
     httpApp.get('*', (req, res) => {
@@ -507,9 +620,12 @@ async function startServer() {
       logger.info(`>>> HTTP Redirect Server active on port 80 <<<`);
     });
   } else {
-    app.listen(PORT, "0.0.0.0", () => {
-      logger.info(`>>> Full-Stack Express Server active on: http://localhost:${PORT} <<<`);
+    const server = app.listen(PORT, "0.0.0.0", () => {
+      const domainMsg = process.env.CUSTOM_DOMAIN ? ` (custom domain: ${process.env.CUSTOM_DOMAIN})` : '';
+      logger.info(`>>> Full-Stack Express Server active on: http://localhost:${PORT}${domainMsg} <<<`);
     });
+    wss = new WebSocketServer({ server });
+    logger.info("WebSocket server initialized");
   }
 }
 
