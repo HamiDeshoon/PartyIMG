@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   ArrowLeft, Download, Image, Loader, X, Video,
   CheckSquare, Square as SquareIcon, Users, Filter,
@@ -65,7 +65,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
 
   const photos = mediaItems.filter(m => m.type !== "video");
   const allFilters = [...new Set(mediaItems.map(m => m.filter))];
-  const allGuests = [...new Set(mediaItems.map(m => m.guestName).filter(Boolean))];
+  const allGuests: string[] = [...new Set(mediaItems.map(m => m.guestName).filter(Boolean) as string[])];
 
   const faceGroupingInProgress = faceGrouping;
 
