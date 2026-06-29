@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -389,6 +390,7 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
         const ffmpeg = (await import("fluent-ffmpeg")).default;
         await new Promise<void>((resolve, reject) => {
           ffmpeg(req.file.path)
+            .outputOptions('-qscale:v', '2') // higher quality thumbnail
             .on('end', () => resolve())
             .on('error', (err: any) => reject(err))
             .screenshots({
@@ -412,6 +414,24 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
       logger.error("Failed to generate thumbnail: " + err);
     }
 
+    // If uploading a video, re-encode to retain quality
+    if (type === 'video' && req.file) {
+      const ffmpeg = (await import('fluent-ffmpeg')).default;
+      const processedPath = req.file.path + '_hq.mp4';
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(req.file.path)
+          .outputOptions('-c:v libx264', '-crf', '18', '-preset', 'slow')
+          .save(processedPath)
+          .on('end', () => resolve())
+          .on('error', (err: any) => reject(err));
+      });
+      // Replace original file with processed version
+      if (fs.existsSync(processedPath)) {
+        fs.unlinkSync(req.file.path);
+        req.file.path = processedPath;
+        req.file.originalname = path.basename(processedPath);
+      }
+    }
     const { url: publicUrl, systemSavePath } = await storageProvider.saveFile(
         req.file, eventId, type, req.file.originalname, undefined, event.saveDirectory || undefined
     );

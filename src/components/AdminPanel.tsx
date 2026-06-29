@@ -70,7 +70,8 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [cardFooter, setCardFooter] = useState("");
   const [cardTheme, setCardTheme] = useState<"slate" | "cream" | "neon" | "sage">("slate");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
-  const [cardCustomImage, setCardCustomImage] = useState<string | null>(null);
+  // Use a default personalized image (e.g., couple photo) for cards
+  const [cardCustomImage, setCardCustomImage] = useState<string | null>("/couple.jpg");
   const [customGuestAddress, setCustomGuestAddress] = useState("");
 
   // Enhanced Print Card options
@@ -174,11 +175,13 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     }
   };
 
-  const guestLink = selectedEventId 
-    ? (customGuestAddress.trim() 
-        ? `${window.location.origin.replace(/\/$/, '')}/${customGuestAddress.trim().replace(/^\/+/, '')}`
-        : `${window.location.origin}/#/guest/${selectedEventId}`)
-    : "";
+  // Base URL for QR links using provided IP and port
+  // Base URL points to the landing hub page (album & admin options)
+  const baseQrUrl = "http://192.168.70.32:80/";
+  // QR now points to the landing page (hub) to allow access to album and admin options
+  const guestLink = customGuestAddress.trim()
+    ? `${baseQrUrl}/${customGuestAddress.trim().replace(/^\/+/, '')}`
+    : baseQrUrl;
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
