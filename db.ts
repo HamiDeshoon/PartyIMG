@@ -62,6 +62,7 @@ export async function initDb(): Promise<Database> {
       passwordHash TEXT NOT NULL,
       isSuperuser BOOLEAN DEFAULT 0
     );
+
   `);
 
   try {
@@ -230,3 +231,4 @@ export async function likeMedia(mediaId: string) {
   await db.run('UPDATE media SET likes = likes + 1 WHERE id = ?', mediaId);
   return await db.get('SELECT * FROM media WHERE id = ?', mediaId);
 }
+

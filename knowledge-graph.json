@@ -1,0 +1,17 @@
+{
+  "entities": [
+    {"name": "User", "entityType": "Person", "observations": ["The user interacting with the system, likely named Hamid."]},
+    {"name": "PartyIMG", "entityType": "Project", "observations": ["A React-based image sharing project located at d:/Gits/PartyIMG."]},
+    {"name": "GuestPanel", "entityType": "Component", "observations": ["React component for guest users, located at src/components/GuestPanel.tsx."]},
+    {"name": "AdminPanel", "entityType": "Component", "observations": ["React component for admin interface, located at src/components/AdminPanel.tsx."]},
+    {"name": "LiveAlbum", "entityType": "Component", "observations": ["React component for live album view, located at src/components/LiveAlbum.tsx."]},
+    {"name": "Server", "entityType": "Module", "observations": ["Node.js server entry point at server.ts."]}
+  ],
+  "relations": [
+    {"from": "User", "to": "PartyIMG", "relationType": "owns"},
+    {"from": "PartyIMG", "to": "GuestPanel", "relationType": "contains"},
+    {"from": "PartyIMG", "to": "AdminPanel", "relationType": "contains"},
+    {"from": "PartyIMG", "to": "LiveAlbum", "relationType": "contains"},
+    {"from": "PartyIMG", "to": "Server", "relationType": "provides"}
+  ]
+}

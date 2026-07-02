@@ -970,6 +970,12 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                                 className="w-full h-full object-cover"
                                 referrerPolicy="no-referrer"
                                 loading="lazy"
+                                onError={(e) => {
+                                  const target = e.currentTarget;
+                                  if (target.src.includes('/api/thumbnail/')) return;
+                                  if (target.src === m.url) return;
+                                  target.src = `/api/thumbnail/${eventId}/${m.id}`;
+                                }}
                               />
                             )}
 

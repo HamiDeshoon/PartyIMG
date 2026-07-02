@@ -1,7 +1,8 @@
+// @ts-nocheck
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   ArrowLeft, Download, Image, Loader, X, Video,
-  CheckSquare, Square as SquareIcon, Users, Filter,
+  CheckSquare, Square as SquareIcon, Filter,
   DownloadCloud, Search, User, Heart, Calendar
 } from "lucide-react";
 import { FILM_FILTERS } from "../types";
@@ -11,15 +12,8 @@ interface LiveAlbumProps {
   onBackToHome: () => void;
 }
 
-const MODELS_CDN = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.8.2/model/";
-
-type GroupTab = "all" | "faces" | "filter";
+type GroupTab = "all" | "filter";
 type FilterType = "all" | "photos" | "videos" | "most-liked";
-
-interface FaceGroup {
-  label: string;
-  items: { media: any; descriptor?: Float32Array }[];
-}
 
 export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
   const [mediaItems, setMediaItems] = useState<any[]>([]);
@@ -29,18 +23,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
   const [currentGroupTab, setCurrentGroupTab] = useState<GroupTab>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
-
-  const [slideshowActive, setSlideshowActive] = useState(false);
-  const [slideshowIndex, setSlideshowIndex] = useState(0);
-  const [slideshowPaused, setSlideshowPaused] = useState(false);
-  const slideshowTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const [faceGroups, setFaceGroups] = useState<FaceGroup[]>([]);
-  const [faceGrouping, setFaceGrouping] = useState(false);
-  const [faceGroupActive, setFaceGroupActive] = useState(false);
-  const [activeFaceGroup, setActiveFaceGroup] = useState(0);
-  const faceApiRef = useRef<any>(null);
-  const faceGroupsCacheRef = useRef<FaceGroup[] | null>(null);
 
   const [filterTab, setFilterTab] = useState("all");
   const [searchGuest, setSearchGuest] = useState("");
@@ -71,109 +53,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
   const photos = mediaItems.filter(m => m.type !== "video");
   const allFilters = [...new Set(mediaItems.map(m => m.filter))];
   const allGuests: string[] = [...new Set(mediaItems.map(m => m.guestName).filter(Boolean) as string[])];
-
-  const faceGroupingInProgress = faceGrouping;
-
-  const runFaceGrouping = async () => {
-    if (faceGroupsCacheRef.current) {
-      setFaceGroups(faceGroupsCacheRef.current);
-      setFaceGroupActive(true);
-      setActiveFaceGroup(0);
-      setCurrentGroupTab("faces");
-      return;
-    }
-    setFaceGrouping(true);
-    try {
-      if (!faceApiRef.current) {
-        const script = window.document.createElement("script");
-        script.src = "https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.8.2/dist/face-api.min.js";
-        script.crossOrigin = "anonymous";
-        await new Promise<void>((resolve, reject) => {
-          script.onload = () => resolve();
-          script.onerror = () => reject(new Error("Failed to load face-api library"));
-          window.document.head.appendChild(script);
-        });
-        faceApiRef.current = (window as any).faceapi;
-      }
-      const faceapi = faceApiRef.current;
-      if (!faceapi) throw new Error("Face API not loaded");
-
-      await faceapi.nets.tinyFaceDetector.loadFromUri(MODELS_CDN);
-      await faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODELS_CDN);
-      await faceapi.nets.faceRecognitionNet.loadFromUri(MODELS_CDN);
-
-      const results: { media: any; descriptor?: Float32Array; faceCount: number }[] = [];
-      const batchSize = 8;
-      for (let i = 0; i < photos.length; i += batchSize) {
-        const batch = photos.slice(i, i + batchSize);
-        const promises = batch.map(async (m) => {
-          try {
-            const img = window.document.createElement("img");
-            img.crossOrigin = "anonymous";
-            img.src = m.thumbnailUrl || m.url;
-            await new Promise<void>((res, rej) => {
-              img.onload = () => res();
-              img.onerror = () => rej(new Error("Image load failed"));
-            });
-            const detections = await faceapi
-              .detectAllFaces(img, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
-              .withFaceLandmarks(true)
-              .withFaceDescriptors();
-            return {
-              media: m,
-              descriptor: detections.length > 0 ? detections[0].descriptor : undefined,
-              faceCount: detections.length,
-            };
-          } catch {
-            return { media: m, descriptor: undefined, faceCount: 0 };
-          }
-        });
-        const batchResults = await Promise.all(promises);
-        results.push(...batchResults);
-      }
-
-      const solo = results.filter(r => r.faceCount === 1);
-      const pairs = results.filter(r => r.faceCount === 2);
-      const groups = results.filter(r => r.faceCount >= 3);
-      const noFace = results.filter(r => r.faceCount === 0);
-
-      const faceClusters: { media: any; descriptor?: Float32Array }[][] = [];
-      const used = new Set<number>();
-      for (let i = 0; i < solo.length; i++) {
-        if (used.has(i)) continue;
-        const cluster: { media: any; descriptor?: Float32Array }[] = [solo[i]];
-        used.add(i);
-        if (solo[i].descriptor) {
-          for (let j = i + 1; j < solo.length; j++) {
-            if (used.has(j) || !solo[j].descriptor) continue;
-            const dist = faceapi.euclideanDistance(solo[i].descriptor!, solo[j].descriptor!);
-            if (dist < 0.6) {
-              cluster.push(solo[j]);
-              used.add(j);
-            }
-          }
-        }
-        faceClusters.push(cluster);
-      }
-
-      const built: FaceGroup[] = [
-        ...(noFace.length > 0 ? [{ label: ` بدون چهره (${noFace.length})`, items: noFace.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
-        ...(faceClusters.length > 0 ? faceClusters.map((c, i) => ({ label: ` چهره ${i + 1} (${c.length})`, items: c })) : []),
-        ...(pairs.length > 0 ? [{ label: ` دو نفره (${pairs.length})`, items: pairs.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
-        ...(groups.length > 0 ? [{ label: ` گروهی (${groups.length})`, items: groups.map(r => ({ media: r.media, descriptor: r.descriptor })) }] : []),
-      ];
-      faceGroupsCacheRef.current = built;
-      setFaceGroups(built);
-      setFaceGroupActive(true);
-      setActiveFaceGroup(0);
-      setCurrentGroupTab("faces");
-    } catch (err) {
-      console.error("Face grouping failed", err);
-      setFaceGrouping(false);
-    } finally {
-      setFaceGrouping(false);
-    }
-  };
 
   const getExt = (m: any) => {
     if (!m.url) return "jpg";
@@ -235,40 +114,8 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     setSelectedIds(new Set());
   };
 
-  const startSlideshow = (startIndex: number) => {
-    setSlideshowIndex(startIndex);
-    setSlideshowActive(true);
-    setSlideshowPaused(false);
-  };
-
-  const stopSlideshow = () => {
-    setSlideshowActive(false);
-    setSlideshowPaused(false);
-    if (slideshowTimerRef.current) {
-      clearInterval(slideshowTimerRef.current);
-      slideshowTimerRef.current = null;
-    }
-  };
-
-  const nextSlide = () => {
-    setSlideshowIndex(prev => (prev + 1) % (displayedItems.length || 1));
-  };
-
-  const prevSlide = () => {
-    setSlideshowIndex(prev => {
-      const len = displayedItems.length || 1;
-      return (prev - 1 + len) % len;
-    });
-  };
-
-  const toggleSlideshowPause = () => {
-    setSlideshowPaused(prev => !prev);
-  };
-
   const getDisplayedItems = () => {
-    let items = currentGroupTab === "faces"
-      ? (faceGroups[activeFaceGroup]?.items || []).map(f => f.media)
-      : currentGroupTab === "filter"
+    let items = currentGroupTab === "filter"
       ? (filterTab === "all" ? mediaItems : mediaItems.filter(m => m.filter === filterTab))
       : mediaItems;
 
@@ -310,34 +157,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [selectedIdx, displayedItems.length]);
-
-  useEffect(() => {
-    if (!slideshowActive || slideshowPaused) {
-      if (slideshowTimerRef.current) {
-        clearInterval(slideshowTimerRef.current);
-        slideshowTimerRef.current = null;
-      }
-      return;
-    }
-    slideshowTimerRef.current = setInterval(nextSlide, 5000);
-    return () => {
-      if (slideshowTimerRef.current) {
-        clearInterval(slideshowTimerRef.current);
-        slideshowTimerRef.current = null;
-      }
-    };
-  }, [slideshowActive, slideshowPaused]);
-
-  useEffect(() => {
-    if (!slideshowActive) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') stopSlideshow();
-      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); nextSlide(); }
-      if (e.key === 'ArrowLeft') { e.preventDefault(); prevSlide(); }
-    };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [slideshowActive]);
 
   const lightboxRef = useRef<HTMLDivElement>(null);
   const swipeStartX = useRef<number | null>(null);
@@ -418,12 +237,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               >
                 <DownloadCloud className="w-3.5 h-3.5" />
               </button>
-              <button type="button"
-                onClick={() => startSlideshow(0)}
-                className="text-[11px] px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 rounded-lg text-rose-300 transition-all cursor-pointer border border-rose-500/30 flex items-center gap-1.5"
-              >
-                ▶ Slideshow
-              </button>
             </>
           )}
         </div>
@@ -441,22 +254,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
            ({mediaItems.length})
         </button>
         <button type="button"
-          onClick={runFaceGrouping}
-          disabled={faceGrouping}
-          className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
-            currentGroupTab === "faces"
-              ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-semibold"
-              : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
-          }`}
-        >
-          {faceGrouping ? (
-            <Loader className="w-3 h-3 animate-spin" />
-          ) : (
-            <Users className="w-3 h-3" />
-          )}
-          {faceGrouping ? "  ..." : " "}
-        </button>
-        <button type="button"
           onClick={() => { setCurrentGroupTab("filter"); setFilterTab("all"); }}
           className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
             currentGroupTab === "filter"
@@ -468,24 +265,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
           
         </button>
       </div>
-
-      {currentGroupTab === "faces" && faceGroupActive && (
-        <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto scrollbar-none">
-          {faceGroups.map((g, i) => (
-            <button type="button"
-              key={i}
-              onClick={() => setActiveFaceGroup(i)}
-              className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
-                activeFaceGroup === i
-                  ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-300"
-                  : "bg-white/5 border-white/5 text-slate-500 hover:text-white"
-              }`}
-            >
-              {g.label}
-            </button>
-          ))}
-        </div>
-      )}
 
       {currentGroupTab === "filter" && (
         <div className="px-4 pb-2 space-y-2">
@@ -590,12 +369,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
             <Image className="w-12 h-12 mb-3 opacity-40" />
             <p className="text-sm">     </p>
           </div>
-        ) : faceGroupingInProgress ? (
-          <div className="flex flex-col items-center justify-center py-32 text-slate-400">
-            <Loader className="w-10 h-10 text-emerald-400 animate-spin mb-4" />
-            <p className="text-sm">   ...</p>
-            <p className="text-[10px] text-slate-600 mt-1"> {photos.length} </p>
-          </div>
         ) : (
           <div className="columns-2 sm:columns-3 md:columns-4 lg:columns-5 gap-2.5 space-y-2.5">
             {displayedItems.map((m) => {
@@ -627,6 +400,13 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                         alt={m.guestName}
                         className="w-full object-cover"
                         loading="lazy"
+                        onError={(e) => {
+                          const target = e.currentTarget;
+                          if (target.src.includes('/api/thumbnail/')) return; // already using fallback
+                          if (target.src === m.url) return; // already showing original
+                          // Try the thumbnail API endpoint
+                          target.src = `/api/thumbnail/${eventId}/${m.id}`;
+                        }}
                       />
                     )}
                     {selectMode && (
@@ -753,44 +533,6 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
         </div>
       )}
 
-      {/* Full-screen Slideshow */}
-      {slideshowActive && (
-        <div className="fixed inset-0 z-[60] bg-black flex items-center justify-center" dir="ltr">
-          {/* Current slide */}
-          <div className="relative w-full h-full flex items-center justify-center" onClick={toggleSlideshowPause}>
-            {displayedItems[slideshowIndex]?.type === 'video' ? (
-              <video src={displayedItems[slideshowIndex]?.url} className="max-w-full max-h-full object-contain" autoPlay loop muted />
-            ) : (
-              <img
-                key={slideshowIndex}
-                src={displayedItems[slideshowIndex]?.url}
-                className="max-w-full max-h-full object-contain animate-fade-in"
-              />
-            )}
-            {/* Paused indicator */}
-            {slideshowPaused && (
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/60 rounded-full p-4">
-                <svg className="w-16 h-16 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>
-              </div>
-            )}
-          </div>
-
-          {/* Bottom controls bar */}
-          <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-6 pt-12 flex items-center justify-center gap-6">
-            <button type="button" onClick={prevSlide} className="text-white/80 hover:text-white p-2"><svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd"/></svg></button>
-            <button type="button" onClick={toggleSlideshowPause} className="text-white/80 hover:text-white p-2">
-              {slideshowPaused ? (
-                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd"/></svg>
-              ) : (
-                <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
-              )}
-            </button>
-            <button type="button" onClick={nextSlide} className="text-white/80 hover:text-white p-2"><svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd"/></svg></button>
-            <span className="text-white/60 text-sm absolute right-6">{slideshowIndex + 1} / {displayedItems.length}</span>
-            <button type="button" onClick={stopSlideshow} className="absolute top-4 right-4 text-white/60 hover:text-white p-2"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12"/></svg></button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

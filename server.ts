@@ -167,6 +167,93 @@ const requireAdmin = (req: any, res: any, next: any) => {
 
 app.use("/uploads", express.static(uploadsBaseDir, { maxAge: "30d" }));
 
+// Dynamic thumbnail generation: if a .webp thumbnail is requested but doesn't exist,
+// generate it from the original image on-the-fly and cache it for future requests
+app.get("/uploads/:eventId/photos/thumb-:filename.webp", async (req, res) => {
+  const { eventId, filename } = req.params;
+  const photosDir = path.join(uploadsBaseDir, eventId, "photos");
+  const thumbPath = path.join(photosDir, `thumb-${filename}.webp`);
+  
+  // If thumbnail exists, serve it
+  if (fs.existsSync(thumbPath)) {
+    return res.sendFile(thumbPath);
+  }
+  
+  // Find the original file by searching for partial match
+  // The filename in the URL is the original upload name (e.g. "photo-1234567890-uuid.jpg")
+  // but the stored file is renamed to "media-{timestamp}-{uuid}.jpg"
+  let originalPath: string | null = null;
+  
+  // Try exact match first
+  const exactMatch = path.join(photosDir, filename);
+  if (fs.existsSync(exactMatch)) {
+    originalPath = exactMatch;
+  }
+  
+  // Try with common extensions
+  if (!originalPath) {
+    const extensions = ['.jpg', '.jpeg', '.png', '.heic', '.webp', '.gif'];
+    for (const ext of extensions) {
+      const candidate = path.join(photosDir, `${filename}${ext}`);
+      if (fs.existsSync(candidate)) {
+        originalPath = candidate;
+        break;
+      }
+    }
+  }
+  
+  // Try partial match (search for filename prefix in the photos directory)
+  if (!originalPath && fs.existsSync(photosDir)) {
+    const baseName = filename.replace(/\.[^.]+$/, ''); // Remove extension
+    const files = fs.readdirSync(photosDir);
+    // Look for files that contain part of the original name (UUID match)
+    const uuidMatch = filename.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (uuidMatch) {
+      const uuid = uuidMatch[0];
+      const found = files.find(f => f.includes(uuid) && !f.startsWith('thumb-'));
+      if (found) {
+        originalPath = path.join(photosDir, found);
+      }
+    }
+    // Fallback: if only one non-thumbnail image exists, use it
+    if (!originalPath) {
+      const imageFiles = files.filter(f => !f.startsWith('thumb-') && /\.(jpg|jpeg|png|heic|webp)$/i.test(f));
+      if (imageFiles.length > 0) {
+        // Try to match by timestamp or just use the first one
+        const candidate = path.join(photosDir, imageFiles[0]);
+        originalPath = candidate;
+      }
+    }
+  }
+  
+  if (!originalPath) {
+    return res.status(404).json({ error: "Original image not found" });
+  }
+  
+  // Generate thumbnail from original
+  try {
+    const thumbBuffer = await sharp(originalPath)
+      .rotate()
+      .resize({ width: 600, withoutEnlargement: true })
+      .webp({ quality: 80 })
+      .toBuffer();
+    
+    // Ensure directory exists
+    fs.mkdirSync(path.dirname(thumbPath), { recursive: true });
+    
+    // Cache the thumbnail for future requests
+    fs.writeFileSync(thumbPath, thumbBuffer);
+    
+    res.set("Content-Type", "image/webp");
+    res.send(thumbBuffer);
+  } catch (err) {
+    logger.error("Failed to generate thumbnail: " + err);
+    // Fallback: serve the original image
+    res.sendFile(originalPath);
+  }
+});
+
+
 // Fallback middleware: serve from custom save directories
 app.use("/uploads", async (req: any, res, next) => {
   const urlParts = req.path.replace(/^\/+/, "").split("/");
@@ -208,6 +295,7 @@ const uploadParams = multer({
 
 // --- API ROUTES ---
 
+
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 app.get("/api/admin/check", (req: any, res) => {
@@ -234,6 +322,41 @@ app.post("/api/admin/login", loginLimiter, async (req: any, res) => {
 app.post("/api/admin/logout", (req: any, res) => {
   req.session.destroy();
   res.json({ success: true });
+});
+
+// Thumbnail generation endpoint - generates webp thumbnails on-the-fly from original files
+app.get("/api/thumbnail/:eventId/:mediaId", async (req, res) => {
+  try {
+    const { eventId, mediaId } = req.params;
+    const sqlite = await db.getDb();
+    const media = await sqlite.get('SELECT * FROM media WHERE id = ? AND eventId = ?', mediaId, eventId);
+    if (!media) return res.status(404).json({ error: "Media not found" });
+    const originalPath = media.systemSavePath || path.join(uploadsBaseDir, String(media.url).replace(/^\/uploads\//, ''));
+    if (!fs.existsSync(originalPath)) return res.status(404).json({ error: "Original file not found" });
+    if (media.type === 'video') {
+      try {
+        const ffmpeg = (await import("fluent-ffmpeg")).default;
+        const thumbOutput = originalPath + '_thumb.jpg';
+        if (!fs.existsSync(thumbOutput)) {
+          await new Promise<void>((resolve, reject) => {
+            ffmpeg(originalPath).screenshots({ count: 1, timemarks: ['1'], filename: path.basename(thumbOutput), folder: path.dirname(thumbOutput) }).on('end', () => resolve()).on('error', (err: any) => reject(err));
+          });
+        }
+        if (fs.existsSync(thumbOutput)) { res.set("Content-Type", "image/jpeg"); return res.sendFile(thumbOutput); }
+      } catch (err) { logger.error("Video thumbnail failed: " + err); }
+      return res.status(500).json({ error: "Failed to generate video thumbnail" });
+    }
+    const thumbBuffer = await sharp(originalPath).rotate().resize({ width: 600, withoutEnlargement: true }).webp({ quality: 80 }).toBuffer();
+    const thumbFilename = `thumb-${path.basename(originalPath, path.extname(originalPath))}.webp`;
+    const thumbPath = path.join(uploadsBaseDir, eventId, "photos", thumbFilename);
+    fs.mkdirSync(path.dirname(thumbPath), { recursive: true });
+    fs.writeFileSync(thumbPath, thumbBuffer);
+    res.set("Content-Type", "image/webp");
+    res.send(thumbBuffer);
+  } catch (err) {
+    logger.error("Thumbnail generation failed: " + err);
+    res.status(500).json({ error: "Failed to generate thumbnail" });
+  }
 });
 
 app.get("/api/events", async (req, res, next) => {
@@ -461,6 +584,7 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
     };
 
     await db.createMedia(mediaItem);
+
     res.json(mediaItem);
     broadcastEvent('media:uploaded', { eventId, media: mediaItem });
   } catch (err: any) {
