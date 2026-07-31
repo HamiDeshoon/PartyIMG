@@ -49,6 +49,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [formImgLimit, setFormImgLimit] = useState(0);
   const [formVidLimit, setFormVidLimit] = useState(0);
   const [formSaveDir, setFormSaveDir] = useState("D:\\Wedding");
+  const [customGuestAddress, setCustomGuestAddress] = useState("");
 
   // Multi-select media batch deletion state
   const [selectMode, setSelectMode] = useState(false);
@@ -58,6 +59,15 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   // Face recognition state
   const [faceProfiles, setFaceProfiles] = useState<any[]>([]);
   const [isSyncingFaces, setIsSyncingFaces] = useState(false);
+  const [faceTolerance, setFaceTolerance] = useState<number>(() => {
+    const saved = localStorage.getItem("faceTolerance");
+    return saved ? parseFloat(saved) : 0.5;
+  });
+  const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [selectedPeopleForMerge, setSelectedPeopleForMerge] = useState<string[]>([]);
+  const [isClearingFaces, setIsClearingFaces] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null);
 
   const toggleSelectMedia = (id: string) => {
     setSelectedIds(prev => {
@@ -80,30 +90,35 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const handleDeleteSelectedMedia = async () => {
     if (!selectedEventId || selectedIds.size === 0) return;
     const count = selectedIds.size;
-    if (!window.confirm(`آیا از حذف ${count} فایل انتخاب شده مطمئن هستید؟ (این عمل غیرقابل برگشت است)`)) return;
 
-    setIsBatchDeleting(true);
-    const toDeleteIds = Array.from(selectedIds);
-    
-    // Optimistic UI update
-    setMediaItems(prev => prev.filter(m => !selectedIds.has(m.id)));
+    setConfirmAction({
+      message: `آیا از حذف ${count} فایل انتخاب شده مطمئن هستید؟ (این عمل غیرقابل برگشت است)`,
+      onConfirm: async () => {
+        setIsBatchDeleting(true);
+        const toDeleteIds = Array.from(selectedIds);
+        
+        // Optimistic UI update
+        setMediaItems(prev => prev.filter(m => !selectedIds.has(m.id)));
 
-    let successCount = 0;
-    try {
-      for (const id of toDeleteIds) {
-        const res = await fetch(`/api/events/${selectedEventId}/media/${id}`, { method: "DELETE" });
-        if (res.ok) successCount++;
+        let successCount = 0;
+        try {
+          for (const id of toDeleteIds) {
+            const res = await fetch(`/api/events/${selectedEventId}/media/${id}`, { method: "DELETE" });
+            if (res.ok) successCount++;
+          }
+          toast.success(`تعداد ${successCount} فایل با موفقیت حذف شد.`);
+          setSelectedIds(new Set());
+          setSelectMode(false);
+          fetchMedia(selectedEventId);
+        } catch (err: any) {
+          console.error(err);
+          toast.error("خطا در حذف برخی فایل‌ها: " + err.message);
+          if (selectedEventId) fetchMedia(selectedEventId);
+        } finally {
+          setIsBatchDeleting(false);
+        }
       }
-      toast.success(`${successCount} فایل با موفقیت حذف شد`);
-      setSelectedIds(new Set());
-      setSelectMode(false);
-    } catch (err: any) {
-      console.error(err);
-      toast.error("خطا در حذف برخی فایل‌ها: " + err.message);
-      if (selectedEventId) fetchMedia(selectedEventId);
-    } finally {
-      setIsBatchDeleting(false);
-    }
+    });
   };
 
   // Face sync handler
@@ -111,7 +126,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     if (!selectedEventId) return;
     setIsSyncingFaces(true);
     try {
-      const res = await fetch(`/api/events/${selectedEventId}/sync-faces`, { method: "POST" });
+      const res = await fetch(`/api/events/${selectedEventId}/sync-faces?tolerance=${faceTolerance}`, { method: "POST" });
       const data = await res.json();
       if (res.ok) {
         toast.success(`شناسایی چهره انجام شد: ${data.processedCount || 0} عکس پردازش شد`);
@@ -128,6 +143,109 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       toast.error("خطا در ارتباط با سرور: " + err.message);
     } finally {
       setIsSyncingFaces(false);
+    }
+  };
+
+  // Clear face index handler
+  const handleClearFaces = async () => {
+    if (!selectedEventId) return;
+    setConfirmAction({
+      message: "آیا از پاک کردن کامل شاخص چهره‌ها و شروع مجدد مطمئن هستید؟",
+      onConfirm: async () => {
+        setIsClearingFaces(true);
+        try {
+          const res = await fetch(`/api/events/${selectedEventId}/sync-faces`, { method: "DELETE" });
+          if (res.ok) {
+            toast.info("شاخص با موفقیت پاک شد. در حال اسکن مجدد تصاویر...");
+            setFaceProfiles([]);
+            await handleSyncFaces();
+          } else {
+            toast.error("خطا در پاک کردن شاخص چهره‌ها");
+          }
+        } catch (err: any) {
+          toast.error("خطا در ارتباط با سرور: " + err.message);
+        } finally {
+          setIsClearingFaces(false);
+        }
+      }
+    });
+  };
+
+  // Rename person profile handler
+  const handleRenamePerson = async (personId: string, displayName: string) => {
+    if (!selectedEventId || !displayName.trim()) return;
+    try {
+      const res = await fetch(`/api/events/${selectedEventId}/face-profiles/${personId}/rename`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ displayName })
+      });
+      if (res.ok) {
+        toast.success("نام با موفقیت تغییر کرد.");
+        setEditingPersonId(null);
+        // Refresh
+        const profileRes = await fetch(`/api/events/${selectedEventId}/face-profiles`);
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          setFaceProfiles(profileData.profiles || []);
+        }
+      } else {
+        toast.error("خطا در تغییر نام");
+      }
+    } catch (err: any) {
+      toast.error("خطا در ارتباط با سرور: " + err.message);
+    }
+  };
+
+  // Delete person profile handler
+  const handleDeletePerson = async (personId: string) => {
+    if (!selectedEventId) return;
+    setConfirmAction({
+      message: "آیا از حذف این پروفایل مطمئن هستید؟",
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/events/${selectedEventId}/face-profiles/${personId}`, { method: "DELETE" });
+          if (res.ok) {
+            toast.success("پروفایل چهره با موفقیت حذف شد.");
+            // Refresh
+            const profileRes = await fetch(`/api/events/${selectedEventId}/face-profiles`);
+            if (profileRes.ok) {
+              const profileData = await profileRes.json();
+              setFaceProfiles(profileData.profiles || []);
+            }
+          } else {
+            toast.error("خطا در حذف پروفایل چهره");
+          }
+        } catch (err: any) {
+          toast.error("خطا در ارتباط با سرور: " + err.message);
+        }
+      }
+    });
+  };
+
+  // Merge person profiles handler
+  const handleMergePersons = async (targetId: string, sourceIds: string[]) => {
+    if (!selectedEventId || sourceIds.length === 0) return;
+    try {
+      const res = await fetch(`/api/events/${selectedEventId}/face-profiles/merge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetPersonId: targetId, sourcePersonIds: sourceIds })
+      });
+      if (res.ok) {
+        toast.success("پروفایل‌ها با موفقیت ادغام شدند.");
+        setSelectedPeopleForMerge([]);
+        // Refresh
+        const profileRes = await fetch(`/api/events/${selectedEventId}/face-profiles`);
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          setFaceProfiles(profileData.profiles || []);
+        }
+      } else {
+        toast.error("خطا در ادغام پروفایل‌ها");
+      }
+    } catch (err: any) {
+      toast.error("خطا در ارتباط با سرور: " + err.message);
     }
   };
 
@@ -163,9 +281,6 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [cardFooter, setCardFooter] = useState("با عشق، فاطمه و حمید • Fatemeh & Hamid");
   const [cardTheme, setCardTheme] = useState<"slate" | "cream" | "neon" | "sage">("cream");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
-  const [cardCustomImage, setCardCustomImage] = useState<string | null>("/couple.jpg");
-  const [showCouplePhoto, setShowCouplePhoto] = useState(true);
-  const [customGuestAddress, setCustomGuestAddress] = useState("");
 
   // Enhanced Print Card options
   const [cardPaperSize, setCardPaperSize] = useState('4x6');
@@ -340,7 +455,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         setCardTitle(ev.name || "مراسم عروسی فاطمه و حمید");
         setCardGreeting(ev.hostName ? `خوش آمدید از طرف ${ev.hostName}` : "به آلبوم دیجیتال عروسی ما خوش آمدید!");
         setCardSubtitle("اسکن کنید و لحظات زیبای خود را ثبت کنید");
-        setCardInstructions(ev.description || "کد را با دوربین گوشی اسکن کنید، عکس یا ویدیو بگیرید و در آلبوم دیجیتال ما ثبت کنید.");
+        setCardInstructions(ev.description || "کد را با دوربین گوشی اسکن کنید، عکس یا ویدیو بگیرید و در 앨범 دیجیتال ما ثبت کنید.");
         const formattedDate = ev.date ? ` • ${ev.date}` : "";
         setCardFooter(`با عشق، ${ev.hostName || "فاطمه و حمید"}${formattedDate} • PartyIMG`);
       }
@@ -392,7 +507,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               setMediaItems(prev => [msg.data.media, ...prev]);
             } else if (msg.type === 'media:liked' && msg.data.eventId === selectedEventId) {
               if (msg.data.media) {
-                setMediaItems(prev => prev.map(m => m.id === msg.data.mediaId ? { ...m, ...msg.data.media } : m));
+                setMediaItems(prev => prev.map(m => m.id === msg.data.mediaId ? { ...m, ...msg.data.midia } : m));
               }
             } else if (msg.type === 'media:deleted' && msg.data.eventId === selectedEventId) {
               setMediaItems(prev => prev.filter(m => m.id !== msg.data.mediaId));
@@ -515,31 +630,35 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
 
   const handleDeleteMedia = async (mediaId: string) => {
     if (!selectedEventId) return;
-    if (!window.confirm("آیا از حذف این فایل مطمئن هستید؟ (این عمل غیرقابل برگشت است)")) return;
     
-    // Optimistic UI update
-    const mediaToDelete = mediaItems.find(m => m.id === mediaId);
-    setMediaItems(prev => prev.filter(m => m.id !== mediaId));
+    setConfirmAction({
+      message: "آیا از حذف این فایل مطمئن هستید؟ (این عمل غیرقابل برگشت است)",
+      onConfirm: async () => {
+        // Optimistic UI update
+        const mediaToDelete = mediaItems.find(m => m.id === mediaId);
+        setMediaItems(prev => prev.filter(m => m.id !== mediaId));
 
-    try {
-      const res = await fetch(`/api/events/${selectedEventId}/media/${mediaId}`, { 
-        method: "DELETE" 
-      });
-      if (!res.ok) {
-        throw new Error(await res.text());
+        try {
+          const res = await fetch(`/api/events/${selectedEventId}/media/${mediaId}`, { 
+            method: "DELETE" 
+          });
+          if (!res.ok) {
+            throw new Error(await res.text());
+          }
+        } catch (err: any) {
+          console.error(err);
+          toast.error("خطا در حذف فایل: " + err.message);
+          // Rollback
+          if (mediaToDelete) {
+            setMediaItems(prev => {
+              const restored = [...prev, mediaToDelete];
+              restored.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+              return restored;
+            });
+          }
+        }
       }
-    } catch (err: any) {
-      console.error(err);
-      toast.error("خطا در حذف فایل: " + err.message);
-      // Rollback
-      if (mediaToDelete) {
-        setMediaItems(prev => {
-          const restored = [...prev, mediaToDelete];
-          restored.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          return restored;
-        });
-      }
-    }
+    });
   };
 
   const handleLikeMedia = async (mediaId: string) => {
@@ -677,6 +796,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
 
   const downloadPostalCard = () => {
     if (!selectedEvent) return;
+    if (!qrCodeDataUrl) return;
     const canvas = document.createElement("canvas");
     canvas.width = 1000;
     canvas.height = 1500;
@@ -792,28 +912,11 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(qrx - 10, qry - 10, qrSize + 20, qrSize + 20);
 
-    const finalizeCard = (mainImgElem: HTMLImageElement, isCustomImage: boolean) => {
-      // Draw main image (QR or Custom)
-      ctx.drawImage(mainImgElem, qrx, qry, qrSize, qrSize);
+    // Draw main image (QR)
+    const qrImg = new window.Image();
+    qrImg.onload = () => {
+      ctx.drawImage(qrImg, qrx, qry, qrSize, qrSize);
 
-      // If we used a custom image, append a smaller QR code in the bottom-right corner for scanning
-      if (isCustomImage && qrCodeDataUrl) {
-        const miniQrSize = 120;
-        const miniQr = new window.Image();
-        miniQr.onload = () => {
-          // outer padding for mini QR
-          ctx.fillStyle = "#ffffff";
-          ctx.fillRect(qrx + qrSize - miniQrSize - 10, qry + qrSize - miniQrSize - 10, miniQrSize + 20, miniQrSize + 20);
-          ctx.drawImage(miniQr, qrx + qrSize - miniQrSize, qry + qrSize - miniQrSize, miniQrSize, miniQrSize);
-          continueDrawingText();
-        };
-        miniQr.src = qrCodeDataUrl;
-      } else {
-        continueDrawingText();
-      }
-    };
-
-    const continueDrawingText = () => {
       // Polaroid caption decoration
       ctx.fillStyle = textThemeColor("#b45309", "#ec4899");
       if (cardTheme === "sage") ctx.fillStyle = "#2d4a34";
@@ -844,10 +947,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       a.click();
       document.body.removeChild(a);
     };
-
-    const mainImg = new window.Image();
-    mainImg.onload = () => finalizeCard(mainImg, !!cardCustomImage);
-    mainImg.src = cardCustomImage || qrCodeDataUrl || "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    qrImg.src = qrCodeDataUrl;
   };
 
   const printPostalCard = () => {
@@ -964,14 +1064,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
             </div>
             
             <div class="qr-container">
-              ${showCouplePhoto && cardCustomImage ? `
-                <div style="position: relative;">
-                  <img src="${cardCustomImage}" style="width: 140px; height: 140px; object-fit: cover; border-radius: 8px; display: block;" alt="Couple" />
-                  ${qrCodeDataUrl ? `<div style="position: absolute; bottom: 6px; left: 6px; padding: 3px; background: white; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.25);"><img src="${qrCodeDataUrl}" style="width: 44px; height: 44px; display: block;" /></div>` : ''}
-                </div>
-              ` : `
-                <img class="qr-image" src="${qrCodeDataUrl}" alt="Guest QR Code" />
-              `}
+              <img class="qr-image" src="${qrCodeDataUrl}" alt="Guest QR Code" />
             </div>
 
             <div>
@@ -1068,7 +1161,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
             <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
           </button>
           <div>
-            <h1 className="text-xl font-display font-medium tracking-tight text-white flex items-center gap-2">
+            <h1 className="text-xl font-display font-medium text-white flex items-center gap-2">
               <Settings className="w-5 h-5 text-pink-400 animate-spin-slow" />
               LENS:SHARE <span className="text-xs font-mono text-pink-400 border border-pink-400/35 px-2 py-0.5 rounded-full uppercase" dir="ltr">Admin</span>
               <span className={`inline-block w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`} title={wsConnected ? 'Connected' : 'Disconnected'} />
@@ -1174,7 +1267,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                     <span className="bg-pink-500/10 text-pink-300 border border-pink-500/20 text-xs py-1 px-3 rounded-lg flex items-center gap-1.5">
                       زمان نمایش آلبوم:
                       <span className="font-semibold text-[10px] bg-pink-950/40 border border-pink-500/30 px-1.5 py-0.5 rounded-md text-pink-200">
-                        {selectedEvent.revealStyle === "instant" ? "آنی" : "پس از مراسم"}
+                        {selectedEvent.revealStyle === "instant" ? "آنی" : "پس از ceremonies"}
                       </span>
                     </span>
                     <span className="bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs py-1 px-3 rounded-lg flex items-center gap-1">
@@ -1233,16 +1326,16 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
 
                   {/* Action Buttons Grid */}
                   <div className="w-full space-y-2 font-sans">
-                    <button type="button"
-                      id="copy_guest_link_btn"
-                      onClick={copyGuestLink}
-                      className="text-xs bg-gradient-to-r from-rose-500/20 to-amber-500/20 hover:from-rose-500/30 hover:to-amber-500/30 text-amber-200 font-bold py-2 px-3 rounded-xl transition-all flex items-center gap-1.5 justify-center w-full cursor-pointer border border-amber-500/30 shadow-md active:scale-95"
-                    >
-                      {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Clipboard className="w-4 h-4 text-amber-400" />}
-                      {copiedLink ? "لینک کپی شد!" : "کپی لینک دسترسی مهمانان"}
-                    </button>
+                    <div className="grid grid-cols-3 gap-2 pt-1">
+                      <button type="button"
+                        id="copy_guest_link_btn"
+                        onClick={copyGuestLink}
+                        className="text-xs bg-gradient-to-r from-rose-500/20 to-amber-500/20 hover:from-rose-500/30 hover:to-amber-500/30 text-amber-200 font-bold py-2 px-3 rounded-xl transition-all flex items-center gap-1.5 justify-center w-full cursor-pointer border border-amber-500/30 shadow-md active:scale-95"
+                      >
+                        {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Clipboard className="w-4 h-4 text-amber-400" />}
+                        {copiedLink ? "لینک کپی شد!" : "کپی لینک دسترسی مهمانان"}
+                      </button>
 
-                    <div className="grid grid-cols-2 gap-2 pt-1">
                       <button type="button"
                         onClick={() => setShowCardStudio(true)}
                         className="text-[10px] bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-amber-500/25 active:scale-95"
@@ -1268,15 +1361,6 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                       >
                         <Download className="w-3.5 h-3.5 text-slate-400" />
                         ذخیره QR
-                      </button>
-
-                      <button type="button"
-                        onClick={handleNativeShare}
-                        className="text-[10px] bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-white/10 active:scale-95"
-                        title="ارسال لینک رویداد"
-                      >
-                        <Share2 className="w-3.5 h-3.5 text-sky-400" />
-                        ارسال لینک
                       </button>
                     </div>
                   </div>
@@ -1363,39 +1447,208 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
 
               {/* Face Recognition & Sync */}
               <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-4" id="face_recognition_deck" dir="rtl">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
-                      <Sparkles className="w-5 h-5 text-teal-400" />
-                      شناسایی چهره
-                    </h3>
-                    <p className="text-xs text-slate-300 mt-1">تشخیص خودکار چهره در عکس‌ها و گروه‌بندی بر اساس افراد</p>
-                  </div>
-                  <button type="button"
-                    onClick={handleSyncFaces}
-                    disabled={isSyncingFaces}
-                    className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 font-bold shadow-lg disabled:opacity-50 cursor-pointer"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFaces ? 'animate-spin' : ''}`} />
-                    {isSyncingFaces ? 'در حال پردازش...' : 'شروع شناسایی چهره'}
-                  </button>
+                <div>
+                  <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-teal-400 animate-pulse" />
+                    مدیریت و شناسایی چهره‌ها
+                  </h3>
+                  <p className="text-xs text-slate-300 mt-1">
+                    تشخیص خودکار صورت‌ها در تصاویر، فیلتر کردن تصاویر بر اساس افراد و ویرایش نام یا ادغام چهره‌ها.
+                  </p>
                 </div>
-                {faceProfiles.length > 0 && (
-                  <div className="bg-black/30 rounded-xl p-3 border border-white/10">
-                    <p className="text-xs text-slate-400 mb-2">{faceProfiles.length} پروفایل چهره شناسایی شد</p>
-                    <div className="flex flex-wrap gap-2">
-                      {faceProfiles.map((p: any) => (
-                        <div key={p.personId} className="flex items-center gap-2 bg-white/10 rounded-lg px-3 py-1.5 border border-white/10">
-                          {p.avatarUrl ? (
-                            <img src={p.avatarUrl} className="w-6 h-6 rounded-full object-cover" alt="" />
-                          ) : (
-                            <User className="w-4 h-4 text-teal-400" />
-                          )}
-                          <span className="text-xs text-white">{p.displayName}</span>
-                          <span className="text-[10px] text-slate-400 bg-black/30 px-1.5 py-0.5 rounded-full">{p.photoCount || 0} عکس</span>
-                        </div>
-                      ))}
+
+                {/* Settings Controls Panel */}
+                <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center bg-black/25 rounded-2xl p-4 border border-white/5">
+                  <div className="w-full md:w-1/2 space-y-1">
+                    <label className="text-xs font-semibold text-slate-300 flex items-center justify-between select-none">
+                      <span>🎚️ میزان حساسیت تطابق چهره:</span>
+                      <span className="font-mono text-teal-300 font-bold bg-teal-500/15 border border-teal-500/20 px-2 py-0.5 rounded-md">{faceTolerance}</span>
+                    </label>
+                    <input 
+                      type="range" 
+                      min="0.25" 
+                      max="0.85" 
+                      step="0.05"
+                      value={faceTolerance} 
+                      onChange={e => {
+                        const val = parseFloat(e.target.value);
+                        setFaceTolerance(val);
+                        localStorage.setItem("faceTolerance", val.toString());
+                      }}
+                      className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-teal-400"
+                    />
+                    <div className="flex justify-between text-[9px] text-slate-500 font-mono select-none">
+                      <span>0.25 (آسان‌گیرانه - ادغام بیشتر چهره‌ها)</span>
+                      <span>0.85 (سخت‌گیرانه - پروفایل‌های مجزا و دقیق)</span>
                     </div>
+                  </div>
+                  <div className="flex gap-2 w-full md:w-auto">
+                    <button type="button"
+                      onClick={handleSyncFaces}
+                      disabled={isSyncingFaces}
+                      className="bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white text-xs px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 font-bold shadow-md disabled:opacity-50 cursor-pointer active:scale-95 flex-1 md:flex-none"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFaces ? 'animate-spin' : ''}`} />
+                      {isSyncingFaces ? 'در حال پردازش...' : 'اسکن تصاویر'}
+                    </button>
+                    <button type="button"
+                      onClick={handleClearFaces}
+                      disabled={isClearingFaces}
+                      className="bg-red-500/10 hover:bg-red-500/25 border border-red-500/25 text-red-200 text-xs px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 font-bold disabled:opacity-50 cursor-pointer active:scale-95"
+                      title="پاک کردن کامل شاخص چهره‌ها و اسکن مجدد"
+                    >
+                      {isClearingFaces ? 'در حال پاکسازی...' : 'شروع مجدد'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Merge selected panel */}
+                {selectedPeopleForMerge.length >= 2 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between bg-teal-500/10 border border-teal-500/20 rounded-2xl p-4 text-xs text-teal-200 gap-3">
+                    <span className="font-sans text-center sm:text-right">
+                      <strong>{selectedPeopleForMerge.length} چهره</strong> برای ادغام انتخاب شده است. چهره اصلی مقصد را انتخاب کنید:
+                    </span>
+                    <div className="flex gap-2 w-full sm:w-auto justify-end">
+                      <select
+                        onChange={e => {
+                          const targetId = e.target.value;
+                          if (targetId) {
+                            const sourceIds = selectedPeopleForMerge.filter(id => id !== targetId);
+                            handleMergePersons(targetId, sourceIds);
+                          }
+                        }}
+                        className="bg-black/60 border border-teal-500/30 rounded-lg px-2 py-1 text-xs text-white outline-none cursor-pointer"
+                        defaultValue=""
+                      >
+                        <option value="" disabled>انتخاب پروفایل اصلی مقصد...</option>
+                        {selectedPeopleForMerge.map(id => (
+                          <option key={id} value={id}>
+                            {faceProfiles.find(fp => fp.personId === id)?.displayName || id}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedPeopleForMerge([])}
+                        className="text-slate-400 hover:text-white px-2 py-1 cursor-pointer transition-colors"
+                      >
+                        لغو
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Profiles Display Section */}
+                {faceProfiles.length > 0 ? (
+                  <div className="bg-black/30 rounded-2xl p-4 border border-white/5 space-y-3">
+                    <p className="text-[11px] text-slate-400 mb-1">{faceProfiles.length} پروفایل چهره شناسایی شده است:</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {faceProfiles.map((p: any) => {
+                        const isEditing = editingPersonId === p.personId;
+                        const isSelected = selectedPeopleForMerge.includes(p.personId);
+                        
+                        return (
+                          <div 
+                            key={p.personId} 
+                            className={`group flex items-center justify-between bg-white/5 hover:bg-white/10 rounded-xl p-2.5 border ${isSelected ? 'border-teal-500/50 bg-teal-500/5' : 'border-white/5'} transition-all`}
+                          >
+                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                              {/* Merge Selector Checkbox */}
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={e => {
+                                  setSelectedPeopleForMerge(prev => 
+                                    e.target.checked 
+                                      ? [...prev, p.personId]
+                                      : prev.filter(id => id !== p.personId)
+                                  );
+                                }}
+                                className="rounded accent-teal-500 cursor-pointer w-4 h-4 shrink-0"
+                                title="انتخاب برای ادغام چهره‌ها"
+                              />
+                              
+                              {/* Avatar Crop */}
+                              {p.avatarUrl ? (
+                                <img src={p.avatarUrl} className="w-9 h-9 rounded-lg object-cover shrink-0 border border-white/10" alt="" />
+                              ) : (
+                                <div className="w-9 h-9 bg-black/40 rounded-lg flex items-center justify-center shrink-0 border border-white/5">
+                                  <User className="w-5 h-5 text-teal-400" />
+                                </div>
+                              )}
+                              
+                              {/* Profile Title / Edit Name */}
+                              <div className="flex-1 min-w-0">
+                                {isEditing ? (
+                                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                                    <input
+                                      type="text"
+                                      value={editingName}
+                                      onChange={e => setEditingName(e.target.value)}
+                                      className="bg-black/80 border border-teal-500/50 rounded-lg px-1.5 py-0.5 text-xs text-white w-full max-w-[110px] outline-none"
+                                      autoFocus
+                                      onKeyDown={e => {
+                                        if (e.key === "Enter") handleRenamePerson(p.personId, editingName);
+                                        else if (e.key === "Escape") setEditingPersonId(null);
+                                      }}
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRenamePerson(p.personId, editingName)}
+                                      className="text-emerald-400 hover:text-emerald-300 cursor-pointer"
+                                    >
+                                      <Check className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditingPersonId(null)}
+                                      className="text-rose-400 hover:text-rose-300 cursor-pointer"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-1 min-w-0">
+                                    <span className="text-xs text-white truncate font-semibold">{p.displayName}</span>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditingPersonId(p.personId);
+                                        setEditingName(p.displayName || p.personId);
+                                      }}
+                                      className="text-slate-400 hover:text-teal-300 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer shrink-0"
+                                      title="تغییر نام پروفایل"
+                                    >
+                                      <FileText className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                )}
+                                <p className="text-[10px] text-slate-400 mt-0.5">{p.photoCount || 0} عکس</p>
+                              </div>
+                            </div>
+                            
+                            {/* Delete Profile button */}
+                            <div className="flex items-center shrink-0 mr-2">
+                              <button
+                                type="button"
+                                onClick={() => handleDeletePerson(p.personId)}
+                                className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded-lg border border-red-500/10 transition-colors cursor-pointer"
+                                title="حذف این پروفایل"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-black/20 border border-dashed border-white/5 rounded-2xl py-6 flex flex-col items-center justify-center text-center">
+                    <Users className="w-8 h-8 text-slate-500 mb-2" />
+                    <p className="text-xs text-slate-400 font-sans">هیچ چهره‌ای شناسایی نشده است.</p>
+                    <p className="text-[10px] text-slate-500 mt-0.5">برای شروع، دکمه «اسکن تصاویر» را بزنید.</p>
                   </div>
                 )}
               </div>
@@ -1440,62 +1693,6 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                         💡 <strong>نکته هارد اکسترنال:</strong> مسیر پیش‌فرض <code className="bg-purple-950/40 text-purple-300 px-1 py-0.5 rounded font-mono text-[9px] border border-purple-500/20">D:\Wedding</code> است. در صورت اتصال اس‌اس‌دی یا هارد اکسترنال (مثلاً درایو <code className="bg-purple-950/40 text-purple-300 px-1 py-0.5 rounded font-mono text-[9px] border border-purple-500/20">E:\Wedding</code>)، کافیست مسیر را تغییر داده و روی «ثبت مسیر جدید» کلیک کنید.
                       </p>
                     </div>
-
-                    {/* Cover Image */}
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-350 mb-1">Event Cover Image:</label>
-                      <div className="flex gap-2 items-center">
-                        {selectedEvent.coverImage && (
-                          <img src={selectedEvent.coverImage} className="w-16 h-16 rounded-lg object-cover border border-white/10" />
-                        )}
-                        <input type="file" accept="image/*" className="hidden" id="coverImageUpload"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const formData = new FormData();
-                            formData.append("fileData", file);
-                            formData.append("imageType", "coverImage");
-                            const res = await fetch(`/api/events/${selectedEventId}/upload/event-image`, {
-                              method: "POST", credentials: "include", body: formData
-                            });
-                            if (res.ok) {
-                              const data = await res.json();
-                              setSelectedEvent((prev: any) => ({ ...prev, coverImage: data.url }));
-                              toast.success("Cover image uploaded");
-                            }
-                          }}
-                        />
-                        <label htmlFor="coverImageUpload" className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-all">Upload</label>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-350 mb-1">Couple Photo:</label>
-                      <div className="flex gap-2 items-center">
-                        {selectedEvent.couplePhoto && (
-                          <img src={selectedEvent.couplePhoto} className="w-16 h-16 rounded-lg object-cover border border-white/10" />
-                        )}
-                        <input type="file" accept="image/*" className="hidden" id="couplePhotoUpload"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const formData = new FormData();
-                            formData.append("fileData", file);
-                            formData.append("imageType", "couplePhoto");
-                            const res = await fetch(`/api/events/${selectedEventId}/upload/event-image`, {
-                              method: "POST", credentials: "include", body: formData
-                            });
-                            if (res.ok) {
-                              const data = await res.json();
-                              setSelectedEvent((prev: any) => ({ ...prev, couplePhoto: data.url }));
-                              toast.success("Couple photo uploaded");
-                            }
-                          }}
-                        />
-                        <label htmlFor="couplePhotoUpload" className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs px-3 py-1.5 rounded-lg cursor-pointer transition-all">Upload</label>
-                      </div>
-                    </div>
-
-                    <hr className="border-white/10" />
 
                     <div>
                       <div className="flex items-center justify-between">
@@ -2066,28 +2263,6 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                       className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
                     />
                   </div>
-
-                  {/* Couple Photo Upload Option */}
-                  <div className="pt-2 border-t border-white/10 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <input 
-                        type="checkbox" 
-                        id="show_couple_photo_check"
-                        checked={showCouplePhoto} 
-                        onChange={e => setShowCouplePhoto(e.target.checked)}
-                        className="rounded accent-amber-500 cursor-pointer"
-                      />
-                      <label htmlFor="show_couple_photo_check" className="text-xs text-slate-200 cursor-pointer">
-                        نمایش تصویر زوج در کارت
-                      </label>
-                    </div>
-                    {showCouplePhoto && (
-                      <label className="text-[10px] bg-white/10 hover:bg-white/20 border border-white/15 text-amber-200 px-3 py-1 rounded-lg cursor-pointer transition-all">
-                        آپلود عکس زوج
-                        <input type="file" accept="image/*" onChange={handleCardImageUpload} className="hidden" />
-                      </label>
-                    )}
-                  </div>
                 </div>
               </div>
 
@@ -2132,18 +2307,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                     {/* QR Code Container in Card */}
                     <div className="relative my-2 inline-block mx-auto">
                       <div className="bg-white p-2.5 rounded-2xl shadow-lg border border-black/10 inline-block relative">
-                        {showCouplePhoto && cardCustomImage ? (
-                          <div className="relative">
-                            <img src={cardCustomImage} alt="Couple" className="w-28 h-28 object-cover rounded-xl shadow-xs" />
-                            {qrCodeDataUrl && (
-                              <div className="absolute bottom-1 right-1 bg-white p-1 rounded-lg shadow-md border border-slate-200">
-                                <img src={qrCodeDataUrl} className="w-9 h-9" alt="QR" />
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          qrCodeDataUrl && <img src={qrCodeDataUrl} className="w-28 h-28 rounded-lg" alt="QR" />
-                        )}
+                        {qrCodeDataUrl && <img src={qrCodeDataUrl} className="w-28 h-28 rounded-lg" alt="QR" />}
                       </div>
                     </div>
 
@@ -2271,6 +2435,37 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         </div>
       )}
 
+      {/* Custom Confirmation Modal */}
+      {confirmAction && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md" dir="rtl">
+          <div className="bg-[#2d1c24] border border-white/10 rounded-3xl p-6 max-w-sm w-full mx-4 shadow-2xl space-y-4 text-center">
+            <h3 className="text-base font-bold text-white flex items-center justify-center gap-2">
+              <Sparkles className="w-5 h-5 text-teal-400" />
+              تایید عملیات
+            </h3>
+            <p className="text-xs text-slate-300 leading-relaxed font-sans">{confirmAction.message}</p>
+            <div className="flex gap-3 justify-center pt-2 font-sans">
+              <button
+                type="button"
+                onClick={() => {
+                  confirmAction.onConfirm();
+                  setConfirmAction(null);
+                }}
+                className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold py-2 px-5 rounded-xl cursor-pointer transition-all active:scale-95"
+              >
+                بله، انجام شود
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmAction(null)}
+                className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs font-bold py-2 px-5 rounded-xl cursor-pointer transition-all active:scale-95"
+              >
+                خیر، انصراف
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

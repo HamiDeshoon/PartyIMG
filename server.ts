@@ -845,6 +845,210 @@ app.post("/api/events/:id/trigger-face-index", async (req: any, res: any) => {
   res.json({ success: true, message: "Face indexing triggered in background." });
 });
 
+app.post("/api/events/:id/sync-faces", async (req: any, res: any, next: any) => {
+  const { id } = req.params;
+  
+  if (isIndexingFaces) {
+    return res.status(409).json({ error: "پردازش چهره از قبل در حال اجراست." });
+  }
+
+  isIndexingFaces = true;
+  try {
+    const pythonCmd = process.platform === "win32" ? "python" : "python3";
+    const scriptPath = path.join(process.cwd(), "scripts", "face_recognizer_insightface.py");
+
+    const inputDirs = [uploadsBaseDir];
+    let primarySaveDir: string | undefined;
+    
+    const sqlite = await db.getDb();
+    const event = await sqlite.get('SELECT saveDirectory FROM events WHERE id = ?', id);
+    if (event && event.saveDirectory) {
+      if (!inputDirs.includes(event.saveDirectory)) {
+        inputDirs.push(event.saveDirectory);
+      }
+      primarySaveDir = event.saveDirectory;
+    }
+
+    const outputDir = getFaceIndexDir(primarySaveDir);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    const formattedDirs = inputDirs.map(d => `"${d}"`).join(" ");
+    const cmd = `${pythonCmd} "${scriptPath}" --input-dir ${formattedDirs} --output-dir "${outputDir}" --tolerance ${tolerance} --max-size 800`;
+    
+    logger.info(`Running InsightFace indexer synchronously: ${cmd}`);
+
+    exec(cmd, { 
+      maxBuffer: 1024 * 1024 * 10,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" }
+    }, async (error, stdout, stderr) => {
+      isIndexingFaces = false;
+      if (error) {
+        logger.error(`Face indexing failed: ${error.message}`);
+        return res.status(500).json({ error: "خطا در اجرای اسکریپت شناسایی چهره" });
+      }
+
+      // Read output index to count new photos processed
+      let processedCount = 0;
+      try {
+        const jsonPath = path.join(outputDir, "face_index.json");
+        if (fs.existsSync(jsonPath)) {
+          const content = fs.readFileSync(jsonPath, "utf8");
+          const data = JSON.parse(content);
+          const match = stdout.match(/New Photos Processed\s*:\s*(\d+)/);
+          if (match) {
+            processedCount = parseInt(match[1], 10);
+          }
+        }
+      } catch (e) {
+        logger.warn(`Could not parse face index summary: ${e}`);
+      }
+
+      res.json({ success: true, processedCount });
+    });
+  } catch (err: any) {
+    isIndexingFaces = false;
+    next(err);
+  }
+});
+
+// Clear and Rebuild Face Index Route
+app.delete("/api/events/:id/sync-faces", requireAdmin, async (req: any, res: any, next: any) => {
+  try {
+    const saveDir = await getPrimarySaveDirectory();
+    const faceIdxDir = getFaceIndexDir(saveDir);
+    
+    if (fs.existsSync(faceIdxDir)) {
+      fs.rmSync(faceIdxDir, { recursive: true, force: true });
+    }
+    
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// Rename Face Profile Route
+app.post("/api/events/:id/face-profiles/:personId/rename", requireAdmin, async (req: any, res: any, next: any) => {
+  try {
+    const { personId } = req.params;
+    const { displayName } = req.body;
+    const saveDir = await getPrimarySaveDirectory();
+    const faceIdxDir = getFaceIndexDir(saveDir);
+    const jsonPath = path.join(faceIdxDir, "face_index.json");
+    if (!fs.existsSync(jsonPath)) {
+      return res.status(404).json({ error: "فایل شاخص یافت نشد." });
+    }
+    const content = fs.readFileSync(jsonPath, "utf8");
+    const data = JSON.parse(content);
+    
+    let updated = false;
+    for (const p of (data.persons || [])) {
+      if (p.personId === personId) {
+        p.displayName = displayName;
+        updated = true;
+        break;
+      }
+    }
+    if (!updated) {
+      return res.status(404).json({ error: "پروفایل پیدا نشد." });
+    }
+    
+    fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), "utf8");
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// Delete Face Profile Route
+app.delete("/api/events/:id/face-profiles/:personId", requireAdmin, async (req: any, res: any, next: any) => {
+  try {
+    const { personId } = req.params;
+    const saveDir = await getPrimarySaveDirectory();
+    const faceIdxDir = getFaceIndexDir(saveDir);
+    const jsonPath = path.join(faceIdxDir, "face_index.json");
+    if (!fs.existsSync(jsonPath)) {
+      return res.status(404).json({ error: "فایل شاخص یافت نشد." });
+    }
+    const content = fs.readFileSync(jsonPath, "utf8");
+    const data = JSON.parse(content);
+    
+    const initialLen = (data.persons || []).length;
+    data.persons = (data.persons || []).filter((p: any) => p.personId !== personId);
+    
+    if ((data.persons || []).length === initialLen) {
+      return res.status(404).json({ error: "پروفایل پیدا نشد." });
+    }
+    
+    // Clean up crops
+    const facesDir = getFaceCropsDir(saveDir);
+    if (data.allFaces) {
+      const removedFaces = data.allFaces.filter((f: any) => f.personGroup === personId);
+      for (const rf of removedFaces) {
+        if (rf.thumbnailName) {
+          const cropPath = path.join(facesDir, rf.thumbnailName);
+          if (fs.existsSync(cropPath)) {
+            try { fs.unlinkSync(cropPath); } catch {}
+          }
+        }
+      }
+      data.allFaces = data.allFaces.filter((f: any) => f.personGroup !== personId);
+    }
+    
+    data.totalFacesDetected = (data.allFaces || []).length;
+    data.totalUniquePersons = (data.persons || []).length;
+    
+    fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), "utf8");
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
+// Merge Face Profiles Route
+app.post("/api/events/:id/face-profiles/merge", requireAdmin, async (req: any, res: any, next: any) => {
+  try {
+    const { targetPersonId, sourcePersonIds } = req.body;
+    if (!targetPersonId || !sourcePersonIds || !Array.isArray(sourcePersonIds) || sourcePersonIds.length === 0) {
+      return res.status(400).json({ error: "پارامترهای ادغام نامعتبر هستند." });
+    }
+    
+    const saveDir = await getPrimarySaveDirectory();
+    const faceIdxDir = getFaceIndexDir(saveDir);
+    const jsonPath = path.join(faceIdxDir, "face_index.json");
+    if (!fs.existsSync(jsonPath)) {
+      return res.status(404).json({ error: "فایل شاخص یافت نشد." });
+    }
+    const content = fs.readFileSync(jsonPath, "utf8");
+    const data = JSON.parse(content);
+    
+    const targetPerson = (data.persons || []).find((p: any) => p.personId === targetPersonId);
+    if (!targetPerson) {
+      return res.status(404).json({ error: "پروفایل مقصد یافت نشد." });
+    }
+    
+    const sourcePersons = (data.persons || []).filter((p: any) => sourcePersonIds.includes(p.personId));
+    for (const sp of sourcePersons) {
+      for (const photo of sp.photos || []) {
+        if (!targetPerson.photos.includes(photo)) {
+          targetPerson.photos.push(photo);
+        }
+      }
+    }
+    targetPerson.photoCount = targetPerson.photos.length;
+    
+    if (data.allFaces) {
+      for (const face of data.allFaces) {
+        if (sourcePersonIds.includes(face.personGroup)) {
+          face.personGroup = targetPersonId;
+        }
+      }
+    }
+    
+    data.persons = (data.persons || []).filter((p: any) => !sourcePersonIds.includes(p.personId));
+    data.totalUniquePersons = data.persons.length;
+    
+    fs.writeFileSync(jsonPath, JSON.stringify(data, null, 2), "utf8");
+    res.json({ success: true });
+  } catch (err) { next(err); }
+});
+
 app.use((err: any, req: any, res: any, next: any) => {
   logger.error(err);
   res.status(500).json({ error: 'Internal Server Error' });

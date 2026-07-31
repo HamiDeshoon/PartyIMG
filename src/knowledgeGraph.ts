@@ -121,13 +121,36 @@ const knowledgeGraph = {
     {
       name: "FaceRecognizer",
       entityType: "Script",
-      file: "scripts/face_recognizer.py",
-      description: "Python 3 CPU-only face detector, cropper, and 128-D vector clusterer.",
+      file: "scripts/face_recognizer_insightface.py",
+      description: "Python 3 CPU-optimized face detector, cropper, and vector clusterer using InsightFace (buffalo_l model).",
       observations: [
-        "Uses dlib face_recognition library with HOG/CNN face location detector.",
-        "Resizes photos in-memory to max 800px dimension for high CPU speed.",
-        "Incremental processing: reads face_index.json, skips already processed photos. Never overwrites existing thumbnail crops.",
-        "Outputs cropped face avatar thumbnails into <saveDirectory>\\Face_Index\\faces (e.g. D:\\Wedding\\Face_Index\\faces) and updates face_index.json."
+        "Uses InsightFace ONNX runtime CPU engine for high precision face embeddings and clustering.",
+        "Resizes photos in-memory to max 800px dimension for high performance.",
+        "Incremental processing: reads face_index.json, skips already processed photos without overwriting existing thumbnails.",
+        "Outputs cropped face avatar thumbnails into <saveDirectory>\\Face_Index\\faces and updates face_index.json."
+      ]
+    },
+    {
+      name: "FaceIndex",
+      entityType: "Module",
+      file: "face-index/face_index.json",
+      description: "JSON index storing detected faces, person clusters, and metadata for face recognition functionality.",
+      observations: [
+        "Contains version metadata, processing statistics, and structured face/person data.",
+        "Stored in <saveDirectory>\\Face_Index\\face_index.json where saveDirectory is from the active event.",
+        "Updated incrementally by the face recognition system to avoid reprocessing existing images.",
+        "Used by the server to serve face profiles and thumbnail images."
+      ]
+    },
+    {
+      name: "FaceProfile",
+      entityType: "DataStructure",
+      file: "N/A",
+      description: "Person profile data structure used for face recognition carousel in LiveAlbum component.",
+      observations: [
+        "Contains personId, displayName, photoCount, avatarUrl, and photoNames fields.",
+        "Used by LiveAlbum to display people detected in photos for filtering.",
+        "Generated from face_index.json data by the server's /api/events/:id/face-profiles endpoint."
       ]
     },
     {
@@ -162,6 +185,10 @@ const knowledgeGraph = {
     { from: "ExpressServer", to: "DatabaseLayer", relationType: "calls", details: "Queries and updates events, media records, and admin credentials." },
     { from: "ExpressServer", to: "StorageProvider", relationType: "calls", details: "Saves uploaded photos/videos to disk or R2 bucket." },
     { from: "ExpressServer", to: "FaceRecognizer", relationType: "triggers", details: "Launches background python runner on upload and every 2 minutes." },
+    { from: "ExpressServer", to: "FaceIndex", relationType: "serves", details: "Serves face_index.json and face crops at /face-crops endpoint." },
+    { from: "FaceRecognizer", to: "FaceIndex", relationType: "generates", details: "Creates and updates face_index.json and corresponding face thumbnail images." },
+    { from: "ExpressServer", to: "FaceProfile", relationType: "provides", details: "Serves face profiles data at /api/events/:id/face-profiles endpoint." },
+    { from: "LiveAlbum", to: "FaceProfile", relationType: "uses_for_filtering", details: "Uses face profiles to filter photos by detected people in the UI." },
     { from: "DatabaseLayer", to: "EventsTable", relationType: "persists_to", details: "Manages event metadata and physical save directories." },
     { from: "DatabaseLayer", to: "MediaTable", relationType: "persists_to", details: "Manages photo and video media metadata." },
     { from: "DatabaseLayer", to: "AdminsTable", relationType: "persists_to", details: "Manages admin user accounts." },

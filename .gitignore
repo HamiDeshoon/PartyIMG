@@ -10,3 +10,8 @@ database.sqlite
 *.sqlite-shm
 *.sqlite-wal
 uploads/
+scripts/insightface_models/
+*.onnx
+*.pth
+*.params
+

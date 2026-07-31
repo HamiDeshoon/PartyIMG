@@ -32,14 +32,19 @@ INDEX_VERSION = "2.1"
 # For CPU, we use ctx_id=-1
 app = None
 
-def get_app():
-    """Initialize and return InsightFace app."""
+def get_app(model_name='buffalo_l'):
+    """Initialize and return InsightFace app optimized for fast CPU inference."""
     global app
     if app is None:
-        print("Initializing InsightFace (buffalo_l model)...")
-        app = insightface.app.FaceAnalysis(name='buffalo_l', providers=['CPUExecutionProvider'])
+        print(f"Initializing InsightFace ({model_name} model, CPU optimized)...")
+        # Restrict allowed_modules to detection and recognition to skip heavy unused 3D landmark & gender/age models
+        app = insightface.app.FaceAnalysis(
+            name=model_name,
+            allowed_modules=['detection', 'recognition'],
+            providers=['CPUExecutionProvider']
+        )
         app.prepare(ctx_id=-1, det_size=(640, 640))
-        print("InsightFace initialized successfully.")
+        print("InsightFace initialized successfully (detection: SCRFD_10G_KPS / det_10g, recognition: ArcFace).")
     return app
 
 
@@ -68,8 +73,12 @@ def save_face_index(json_path: Path, index_data: dict):
 
 
 def cosine_similarity(a, b):
-    """Cosine similarity between two normalized vectors."""
-    return float(np.dot(a, b))
+    """Cosine similarity between two vectors with safe normalization."""
+    norm_a = np.linalg.norm(a)
+    norm_b = np.linalg.norm(b)
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return float(np.dot(a, b) / (norm_a * norm_b))
 
 
 def is_duplicate_face(face_embedding, existing_embeddings, threshold=DUPLICATE_THRESHOLD):
@@ -84,7 +93,7 @@ def is_duplicate_face(face_embedding, existing_embeddings, threshold=DUPLICATE_T
 # ============================================================
 # Main Processing Pipeline
 # ============================================================
-def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800):
+def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_name='buffalo_l'):
     """
     Main face indexing pipeline using InsightFace.
     
@@ -93,8 +102,9 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800):
         output_dir: Output directory for face index and crops
         tolerance: Recognition threshold (cosine similarity, lower = stricter)
         max_size: Max image dimension for processing
+        model_name: InsightFace model pack ('buffalo_l' or 'buffalo_sc')
     """
-    app = get_app()
+    app = get_app(model_name=model_name)
     
     output_dir = Path(output_dir)
     faces_dir = output_dir / "faces"
@@ -123,8 +133,8 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800):
         person_embeddings = {}
         print("No existing index found. Starting fresh.")
     
-    # Find all image files
-    image_extensions = {'.jpg', '.jpeg', '.png', '.webp', '.heic', '.JPG', '.JPEG', '.PNG', '.WEBP', '.HEIC'}
+    # Find all image files (excluding dynamic webp thumbnails)
+    image_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.JPG', '.JPEG', '.PNG', '.HEIC'}
     photo_files = []
     seen_paths = set()
     
@@ -199,8 +209,10 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800):
                 if x2 <= x1 or y2 <= y1:
                     continue
                 
-                # Get embedding (already normalized)
-                embedding = face.embedding.astype(np.float32)
+                # Get embedding and normalize it (InsightFace returns raw embeddings)
+                raw_emb = face.embedding.astype(np.float32)
+                norm_val = np.linalg.norm(raw_emb)
+                embedding = raw_emb / norm_val if norm_val > 0 else raw_emb
                 
                 # Check for duplicate face
                 if is_duplicate_face(embedding, all_known_embeddings, threshold=DUPLICATE_THRESHOLD):
@@ -331,9 +343,10 @@ def main():
     parser.add_argument('--output-dir', required=True, help='Output directory for face index')
     parser.add_argument('--tolerance', type=float, default=0.6, help='Recognition threshold (cosine sim)')
     parser.add_argument('--max-size', type=int, default=800, help='Max image dimension for processing')
+    parser.add_argument('--model-name', default='buffalo_l', choices=['buffalo_l', 'buffalo_sc'], help='InsightFace model pack (buffalo_l or ultra-fast buffalo_sc)')
     args = parser.parse_args()
     
-    process_images(args.input_dir, args.output_dir, args.tolerance, args.max_size)
+    process_images(args.input_dir, args.output_dir, args.tolerance, args.max_size, args.model_name)
 
 
 if __name__ == '__main__':
