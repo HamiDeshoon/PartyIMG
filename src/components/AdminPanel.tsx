@@ -2,8 +2,9 @@ import React, { useState, useEffect, FormEvent, useMemo, useRef } from "react";
 import { 
   Plus, QrCode, Clipboard, Check, Trash2, Folder, 
   Settings, Sparkles, Download, Heart, Eye, Play, 
-  RefreshCw, FileText, Terminal, ArrowLeft, Image, Video, Users, Printer, Activity, Share2, X,
-  ChevronLeft, ChevronRight
+  RefreshCw, FileText, Terminal, ArrowLeft, Image, Video, Users, User, Printer, Activity, Share2, X,
+
+  ChevronLeft, ChevronRight, CheckSquare, Square
 } from "lucide-react";
 import { EventConfig, FILM_FILTERS } from "../types";
 import QRCode from "qrcode";
@@ -44,14 +45,106 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [formHost, setFormHost] = useState("");
   const [formDesc, setFormDesc] = useState("");
   const [formReveal, setFormReveal] = useState<"instant" | "delay">("instant");
+  const [formMaxDuration, setFormMaxDuration] = useState(30);
   const [formImgLimit, setFormImgLimit] = useState(0);
   const [formVidLimit, setFormVidLimit] = useState(0);
-  const [formSaveDir, setFormSaveDir] = useState("./uploads");
+  const [formSaveDir, setFormSaveDir] = useState("D:\\Wedding");
+
+  // Multi-select media batch deletion state
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBatchDeleting, setIsBatchDeleting] = useState(false);
+
+  // Face recognition state
+  const [faceProfiles, setFaceProfiles] = useState<any[]>([]);
+  const [isSyncingFaces, setIsSyncingFaces] = useState(false);
+
+  const toggleSelectMedia = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllVisibleMedia = () => {
+    const allIds = new Set(mediaItems.map(m => m.id));
+    setSelectedIds(allIds);
+  };
+
+  const deselectAllMedia = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleDeleteSelectedMedia = async () => {
+    if (!selectedEventId || selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    if (!window.confirm(`آیا از حذف ${count} فایل انتخاب شده مطمئن هستید؟ (این عمل غیرقابل برگشت است)`)) return;
+
+    setIsBatchDeleting(true);
+    const toDeleteIds = Array.from(selectedIds);
+    
+    // Optimistic UI update
+    setMediaItems(prev => prev.filter(m => !selectedIds.has(m.id)));
+
+    let successCount = 0;
+    try {
+      for (const id of toDeleteIds) {
+        const res = await fetch(`/api/events/${selectedEventId}/media/${id}`, { method: "DELETE" });
+        if (res.ok) successCount++;
+      }
+      toast.success(`${successCount} فایل با موفقیت حذف شد`);
+      setSelectedIds(new Set());
+      setSelectMode(false);
+    } catch (err: any) {
+      console.error(err);
+      toast.error("خطا در حذف برخی فایل‌ها: " + err.message);
+      if (selectedEventId) fetchMedia(selectedEventId);
+    } finally {
+      setIsBatchDeleting(false);
+    }
+  };
+
+  // Face sync handler
+  const handleSyncFaces = async () => {
+    if (!selectedEventId) return;
+    setIsSyncingFaces(true);
+    try {
+      const res = await fetch(`/api/events/${selectedEventId}/sync-faces`, { method: "POST" });
+      const data = await res.json();
+      if (res.ok) {
+        toast.success(`شناسایی چهره انجام شد: ${data.processedCount || 0} عکس پردازش شد`);
+        // Refresh face profiles
+        const profileRes = await fetch(`/api/events/${selectedEventId}/face-profiles`);
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          setFaceProfiles(profileData.profiles || []);
+        }
+      } else {
+        toast.error(data.error || "خطا در شناسایی چهره");
+      }
+    } catch (err: any) {
+      toast.error("خطا در ارتباط با سرور: " + err.message);
+    } finally {
+      setIsSyncingFaces(false);
+    }
+  };
+
+  // Load face profiles when event changes
+  useEffect(() => {
+    if (selectedEventId) {
+      fetch(`/api/events/${selectedEventId}/face-profiles`)
+        .then(res => res.ok ? res.json() : { profiles: [] })
+        .then(data => setFaceProfiles(data.profiles || []))
+        .catch(() => setFaceProfiles([]));
+    }
+  }, [selectedEventId]);
 
   // Sync state settings
   const [localSyncEnabled, setLocalSyncEnabled] = useState(false);
   const [localSyncHost, setLocalSyncHost] = useState("http://localhost:8080");
-  const [activeSyncDir, setActiveSyncDir] = useState("./uploads");
+  const [activeSyncDir, setActiveSyncDir] = useState("D:\\Wedding");
 
   // System statistics
   const [loading, setLoading] = useState(true);
@@ -61,17 +154,17 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
 
-  // Postal Card Customizable state
+  // Postal Card Customizable state - Personalized for Fatemeh & Hamid
   const [showCardStudio, setShowCardStudio] = useState(false);
-  const [cardGreeting, setCardGreeting] = useState("SCAN TO SNAP INSTANT FRAMES");
-  const [cardTitle, setCardTitle] = useState("");
-  const [cardSubtitle, setCardSubtitle] = useState("Scan to join our collaborative digital live roll");
-  const [cardInstructions, setCardInstructions] = useState("");
-  const [cardFooter, setCardFooter] = useState("");
-  const [cardTheme, setCardTheme] = useState<"slate" | "cream" | "neon" | "sage">("slate");
+  const [cardGreeting, setCardGreeting] = useState("به آلبوم دیجیتال عروسی ما خوش آمدید!");
+  const [cardTitle, setCardTitle] = useState("مراسم عروسی فاطمه و حمید");
+  const [cardSubtitle, setCardSubtitle] = useState("اسکن کنید و لحظات زیبای خود را با ما به اشتراک بگذارید");
+  const [cardInstructions, setCardInstructions] = useState("کد را با دوربین گوشی خود اسکن کنید، عکس بگیرید، فیلتر دلخواه انتخاب کنید و لحظات خاطره‌انگیز را ثبت نمایید.");
+  const [cardFooter, setCardFooter] = useState("با عشق، فاطمه و حمید • Fatemeh & Hamid");
+  const [cardTheme, setCardTheme] = useState<"slate" | "cream" | "neon" | "sage">("cream");
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
-  // Use a default personalized image (e.g., couple photo) for cards
   const [cardCustomImage, setCardCustomImage] = useState<string | null>("/couple.jpg");
+  const [showCouplePhoto, setShowCouplePhoto] = useState(true);
   const [customGuestAddress, setCustomGuestAddress] = useState("");
 
   // Enhanced Print Card options
@@ -240,14 +333,16 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         setSelectedEvent(ev);
         setLocalSyncEnabled(ev.localSyncEnabled || false);
         setLocalSyncHost(ev.localSyncHost || "http://localhost:8080");
-        setActiveSyncDir(ev.saveDirectory || "./uploads");
+        setActiveSyncDir(ev.saveDirectory || "D:\\Wedding");
         fetchMedia(selectedEventId);
 
-        // Initialize postal card printable templates
-        setCardTitle(ev.name || "");
-        setCardInstructions(ev.description || "Help us capture every magic memory. Scan this code with your phone camera to load a customized vintage disposable camera. Snap candid retro polaroids, apply vintage filters, and save directly into our secure localhost sync database directory!");
+        // Initialize postal card printable templates with Persian wedding defaults
+        setCardTitle(ev.name || "مراسم عروسی فاطمه و حمید");
+        setCardGreeting(ev.hostName ? `خوش آمدید از طرف ${ev.hostName}` : "به آلبوم دیجیتال عروسی ما خوش آمدید!");
+        setCardSubtitle("اسکن کنید و لحظات زیبای خود را ثبت کنید");
+        setCardInstructions(ev.description || "کد را با دوربین گوشی اسکن کنید، عکس یا ویدیو بگیرید و در آلبوم دیجیتال ما ثبت کنید.");
         const formattedDate = ev.date ? ` • ${ev.date}` : "";
-        setCardFooter(`Organised by ${ev.hostName || "Sophia Miller"}${formattedDate} • Power by LENS:SHARE`);
+        setCardFooter(`با عشق، ${ev.hostName || "فاطمه و حمید"}${formattedDate} • PartyIMG`);
       }
     } else {
       setSelectedEvent(null);
@@ -758,20 +853,26 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const printPostalCard = () => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      toast.error("Popup blocker prevented physical print template! Please allow popups for this site so the system can launch standard physical printing output.");
+      toast.error("مکانیسم پاپ‌آپ مرورگر مسدود شده است! لطفاً پاپ‌آپ را برای این سایت مجاز کنید تا نسخه پرینت باز شود.");
       return;
     }
 
+    const pWidth = PAPER_SIZES[cardPaperSize]?.width || 4.2;
+    const pHeight = PAPER_SIZES[cardPaperSize]?.height || 6.2;
+    const isPortrait = cardOrientation === 'portrait';
+    const wIn = isPortrait ? pWidth : pHeight;
+    const hIn = isPortrait ? pHeight : pWidth;
+
     printWindow.document.write(`
-      <html>
+      <html dir="rtl">
         <head>
-          <title>Print Guest QR Card - LensShare</title>
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+          <title>کارت دعوت اختصاصی - ${cardTitle || "فاطمه و حمید"}</title>
+          <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap" rel="stylesheet">
           <style>
             body {
               margin: 0;
               padding: 0;
-              font-family: 'Inter', sans-serif;
+              font-family: 'Vazirmatn', sans-serif;
               display: flex;
               align-items: center;
               justify-content: center;
@@ -781,11 +882,11 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               print-color-adjust: exact;
             }
             .postcard {
-              width: 4.2in;
-              height: 6.2in;
-              border: 5px double ${cardTheme === 'cream' ? '#c2933d' : cardTheme === 'sage' ? '#2d4a34' : '#ec4899'};
+              width: ${wIn}in;
+              height: ${hIn}in;
+              border: 5px double ${cardTheme === 'cream' ? '#c2933d' : cardTheme === 'sage' ? '#2d4a34' : cardTheme === 'slate' ? '#f43f5e' : '#c084fc'};
               box-sizing: border-box;
-              background-color: ${cardTheme === 'cream' ? '#faf6ee' : cardTheme === 'sage' ? '#f4f6f4' : '#08050e'};
+              background-color: ${cardTheme === 'cream' ? '#faf6ee' : cardTheme === 'sage' ? '#f4f6f4' : cardTheme === 'slate' ? '#120a1c' : '#0a0710'};
               color: ${cardTheme === 'cream' ? '#1a202c' : cardTheme === 'sage' ? '#1e3022' : '#ffffff'};
               padding: 0.3in;
               display: flex;
@@ -794,67 +895,63 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               align-items: center;
               text-align: center;
               position: relative;
+              border-radius: 12px;
             }
             .greeting {
               font-size: 11px;
               font-weight: 800;
-              letter-spacing: 1.5px;
-              color: ${cardTheme === 'cream' ? '#8a734e' : cardTheme === 'sage' ? '#3f5e46' : '#ec4899'};
+              letter-spacing: 0.5px;
+              color: ${cardTheme === 'cream' ? '#8a734e' : cardTheme === 'sage' ? '#3f5e46' : '#f43f5e'};
               margin: 0;
-              text-transform: uppercase;
             }
             .title {
-              font-size: 21px;
+              font-size: 20px;
               font-weight: 800;
               margin: 4px 0;
               line-height: 1.25;
             }
             .subtitle {
-              font-size: 11px;
+              font-size: 10.5px;
               opacity: 0.85;
-              margin: 0 0 10px 0;
+              margin: 0 0 8px 0;
               font-weight: 600;
             }
             .qr-container {
               background-color: #ffffff;
               padding: 10px;
-              border-radius: 8px;
-              box-shadow: 0 3px 12px rgba(0,0,0,0.15);
+              border-radius: 12px;
+              box-shadow: 0 3px 15px rgba(0,0,0,0.18);
               display: inline-block;
+              position: relative;
             }
             .qr-image {
-              width: 150px;
-              height: 150px;
+              width: 140px;
+              height: 140px;
               display: block;
+              border-radius: 6px;
             }
             .instructions {
-              font-size: 10px;
-              line-height: 1.45;
-              max-width: 90%;
-              margin-top: 10px;
+              font-size: 9.5px;
+              line-height: 1.5;
+              max-width: 92%;
+              margin: 8px auto 0 auto;
               font-weight: 600;
               color: ${cardTheme === 'cream' ? '#2d3748' : cardTheme === 'sage' ? '#3a4c40' : '#e2e8f0'};
             }
             .symbol {
               font-size: 16px;
-              margin: 4px 0;
+              margin: 2px 0;
             }
             .footer {
-              font-size: 8px;
-              opacity: 0.6;
+              font-size: 8.5px;
+              opacity: 0.7;
               margin-top: 6px;
-              letter-spacing: 0.5px;
-              font-weight: 500;
+              font-weight: 600;
+              color: ${cardTheme === 'cream' ? '#8a734e' : cardTheme === 'sage' ? '#2d4a34' : '#f43f5e'};
             }
             @media print {
-              body {
-                background: none;
-              }
-              .postcard {
-                border-radius: 0;
-                box-shadow: none;
-                page-break-inside: avoid;
-              }
+              body { background: none; }
+              .postcard { border-radius: 0; box-shadow: none; page-break-inside: avoid; }
             }
           </style>
         </head>
@@ -862,13 +959,19 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
           <div class="postcard">
             <div>
               <p class="greeting">${cardGreeting}</p>
-              <h1 class="title">${cardTitle}</h1>
+              <h1 class="title">${cardTitle || "مراسم عروسی فاطمه و حمید"}</h1>
               <p class="subtitle">${cardSubtitle}</p>
             </div>
             
-            <div class="qr-container" style="position: relative;">
-              <img class="qr-image" src="${cardCustomImage || qrCodeDataUrl}" alt="Card Main Image" style="object-fit: cover;" />
-              ${cardCustomImage ? `<div style="position: absolute; bottom: 10px; right: 10px; padding: 5px; background: white; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);"><img src="${qrCodeDataUrl}" style="width: 50px; height: 50px; display: block;" /></div>` : ''}
+            <div class="qr-container">
+              ${showCouplePhoto && cardCustomImage ? `
+                <div style="position: relative;">
+                  <img src="${cardCustomImage}" style="width: 140px; height: 140px; object-fit: cover; border-radius: 8px; display: block;" alt="Couple" />
+                  ${qrCodeDataUrl ? `<div style="position: absolute; bottom: 6px; left: 6px; padding: 3px; background: white; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.25);"><img src="${qrCodeDataUrl}" style="width: 44px; height: 44px; display: block;" /></div>` : ''}
+                </div>
+              ` : `
+                <img class="qr-image" src="${qrCodeDataUrl}" alt="Guest QR Code" />
+              `}
             </div>
 
             <div>
@@ -882,7 +985,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               setTimeout(function() {
                 window.print();
                 window.close();
-              }, 600);
+              }, 500);
             };
           </script>
         </body>
@@ -890,6 +993,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     `);
     printWindow.document.close();
   };
+
 
   const downloadSyncScriptUrl = selectedEventId 
     ? `/api/events/${selectedEventId}/sync-script` 
@@ -907,8 +1011,11 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
 
   if (!isAuthenticated) {
     return (
-      <div className="flex-1 min-h-screen bg-[#2a1c22] flex items-center justify-center p-6" id="admin_login_view">
-        <form onSubmit={handleLogin} className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-8 max-w-sm w-full space-y-6 shadow-2xl">
+      <div className="flex-1 min-h-screen bg-[#2a1c22] flex items-center justify-center p-6 relative overflow-hidden" id="admin_login_view">
+        <div className="orb orb-rose" aria-hidden="true" />
+        <div className="orb orb-amber" aria-hidden="true" />
+
+        <form onSubmit={handleLogin} className="glass-card rounded-3xl p-8 max-w-sm w-full space-y-6 shadow-2xl z-10">
           <div className="text-center">
             <h2 className="text-2xl font-display font-medium text-white flex items-center justify-center gap-2">
               <Settings className="w-6 h-6 text-pink-400 animate-spin-slow" />
@@ -922,11 +1029,11 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
           <div className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-widest mb-1">Username</label>
-              <input type="text" value={authUsername} onChange={e => setAuthUsername(e.target.value)} required className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-pink-400" />
+              <input type="text" value={authUsername} onChange={e => setAuthUsername(e.target.value)} required className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-pink-400" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-widest mb-1">Password</label>
-              <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} required className="w-full bg-black/30 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-pink-400" />
+              <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} required className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-pink-400" />
             </div>
           </div>
           
@@ -943,14 +1050,19 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   }
 
   return (
-    <div className="min-h-screen bg-transparent text-white font-sans" id="admin_viewport" dir="rtl">
+    <div className="min-h-screen bg-[#2a1c22] text-white font-sans relative" id="admin_viewport" dir="rtl">
+      
+      {/* Ambient background orbs */}
+      <div className="orb orb-rose" aria-hidden="true" />
+      <div className="orb orb-amber" aria-hidden="true" />
+
       {/* Admin Navbar */}
-      <nav id="admin_nav" className="sticky top-0 z-25 flex items-center justify-between px-6 py-4 backdrop-blur-md bg-white/5 border-b border-white/10 text-white shadow-lg">
+      <nav id="admin_nav" className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 glass-card border-b border-white/10 text-white shadow-lg">
         <div className="flex items-center space-x-3 rtl:space-x-reverse">
           <button type="button"
             id="admin_back_btn"
             onClick={onBackToHome} 
-            className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white backdrop-blur-md border border-white/10 transition-colors cursor-pointer"
+            className="p-2 bg-white/5 hover:bg-white/15 rounded-lg text-white border border-white/10 transition-colors cursor-pointer"
             title="بازگشت به صفحه اصلی"
           >
             <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
@@ -988,7 +1100,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         
         {/* Left column: Event selection sidebar */}
         <div className="lg:col-span-1 space-y-4 font-sans" id="admin_event_picker_sidebar">
-          <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-2xl p-4 shadow-2xl">
+          <div className="glass-card rounded-2xl p-4 shadow-2xl">
             <h2 className="text-xs font-bold tracking-wider text-slate-300 mb-3 flex items-center justify-between">
               <span>رویدادهای فعال</span>
               <span className="bg-pink-500/20 text-pink-300 border border-pink-500/30 text-[10px] py-0.5 px-2.5 rounded-full font-mono">{events.length}</span>
@@ -1027,7 +1139,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
           </div>
 
           {selectedEvent && (
-            <div className="backdrop-blur-xl bg-white/5 border border-rose-500/25 rounded-2xl p-4 shadow-xl" id="danger_zone">
+            <div className="glass-card border border-rose-500/25 rounded-2xl p-4 shadow-xl" id="danger_zone">
               <h3 className="text-xs font-bold text-rose-400 mb-2">منطقه خطر</h3>
               <p className="text-[11px] text-slate-350 mb-3 leading-relaxed">حذف این رویداد، تمامی فایل‌های مهمانان را برای همیشه پاک می‌کند.</p>
               <button type="button"
@@ -1047,7 +1159,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
           {selectedEvent ? (
             <>
               {/* Event Header Banner */}
-              <div className="backdrop-blur-md bg-white/5 border border-white/10 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row items-center md:items-start justify-between gap-6" id="event_work_hdr" dir="rtl">
+              <div className="glass-card rounded-2xl p-6 shadow-xl flex flex-col md:flex-row items-center md:items-start justify-between gap-6" id="event_work_hdr" dir="rtl">
                 <div className="space-y-1.5 flex-1 max-w-xl text-right">
                   <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[11px] py-1 px-2.5 rounded-full font-medium inline-block">
                     میزبان: <span dir="ltr">{selectedEvent.hostName}</span>
@@ -1074,59 +1186,106 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                   </div>
                 </div>
 
-                {/* Event Key QR Code Panel */}
-                <div className="backdrop-blur-md bg-black/25 rounded-2xl p-4 border border-white/15 flex flex-col items-center shrink-0 w-full md:w-auto shadow-lg" id="qr_card">
-                  <div className="bg-white p-2.5 rounded-xl mb-2 shadow-inner relative group cursor-pointer" onClick={() => setShowCardStudio(true)} title="برای طراحی کارت دعوت کلیک کنید">
+                {/* Event Key QR Code Panel — Luxury Wedding Redesign */}
+                <div className="backdrop-blur-xl bg-gradient-to-b from-[#3d2530]/90 via-[#2a1c22]/90 to-[#1e1318]/90 rounded-3xl p-5 border border-amber-500/25 flex flex-col items-center shrink-0 w-full md:w-[270px] shadow-2xl relative overflow-hidden" id="qr_card" dir="rtl">
+                  {/* Glowing background orb */}
+                  <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/15 rounded-full blur-2xl pointer-events-none" />
+                  <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-rose-500/15 rounded-full blur-2xl pointer-events-none" />
+
+                  {/* Panel Header */}
+                  <div className="w-full flex items-center justify-between mb-3 border-b border-white/10 pb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+                      <span className="text-xs font-bold text-amber-200">کارت و کد QR رویداد</span>
+                    </div>
+                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                      فعال
+                    </span>
+                  </div>
+
+                  {/* Interactive QR Display Frame */}
+                  <div 
+                    className="qr-glow-frame relative group cursor-pointer my-1 select-none" 
+                    onClick={() => setShowCardStudio(true)} 
+                    title="برای طراحی و پرینت کارت دعوت کلیک کنید"
+                  >
                     {qrCodeDataUrl ? (
                       <img
                         src={qrCodeDataUrl}
                         alt="Guest QR Code"
-                        className="w-28 h-28 select-none rounded"
+                        className="w-32 h-32 select-none rounded-xl"
                       />
                     ) : (
-                      <div className="w-28 h-28 bg-slate-150 flex items-center justify-center text-slate-500 text-xs font-mono">طراحی...</div>
+                      <div className="w-32 h-32 bg-slate-100 flex items-center justify-center text-slate-500 text-xs font-mono">در حال ساخت...</div>
                     )}
-                    <span className="absolute inset-0 bg-black/75 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center text-[9px] text-white font-bold rounded gap-1 select-none">
-                      <Sparkles className="w-4 h-4 text-pink-400 animate-pulse" />
-                      کارت دعوت
-                    </span>
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/60 to-black/30 opacity-0 group-hover:opacity-100 transition-all duration-300 rounded-xl flex flex-col items-center justify-center text-white p-2 text-center backdrop-blur-[2px]">
+                      <Printer className="w-6 h-6 text-amber-300 mb-1 animate-bounce" />
+                      <span className="text-[11px] font-bold text-amber-200 leading-tight">طراحی و پرینت کارت</span>
+                      <span className="text-[8.5px] text-slate-300 mt-0.5">کلیک کنید</span>
+                    </div>
                   </div>
                   
-                  <div className="w-full space-y-2 text-center font-sans">
+                  {/* Host info badge */}
+                  <p className="text-[10.5px] font-bold text-rose-300 mt-2 mb-3 text-center truncate max-w-full">
+                    {selectedEvent?.name || "مراسم عروسی فاطمه و حمید"}
+                  </p>
+
+                  {/* Action Buttons Grid */}
+                  <div className="w-full space-y-2 font-sans">
                     <button type="button"
                       id="copy_guest_link_btn"
                       onClick={copyGuestLink}
-                      className="text-xs bg-white/10 hover:bg-white/15 text-white font-bold py-1.5 px-3 rounded-lg transition-all flex items-center gap-1.5 justify-center w-full cursor-pointer border border-white/5"
+                      className="text-xs bg-gradient-to-r from-rose-500/20 to-amber-500/20 hover:from-rose-500/30 hover:to-amber-500/30 text-amber-200 font-bold py-2 px-3 rounded-xl transition-all flex items-center gap-1.5 justify-center w-full cursor-pointer border border-amber-500/30 shadow-md active:scale-95"
                     >
-                      {copiedLink ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Clipboard className="w-3.5 h-3.5 text-slate-400" />}
-                      {copiedLink ? "لینک کپی شد" : "کپی لینک دسترسی"}
+                      {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Clipboard className="w-4 h-4 text-amber-400" />}
+                      {copiedLink ? "لینک کپی شد!" : "کپی لینک دسترسی مهمانان"}
                     </button>
 
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <button type="button"
+                        onClick={() => setShowCardStudio(true)}
+                        className="text-[10px] bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-amber-500/25 active:scale-95"
+                        title="طراحی و پرینت کارت دعوت"
+                      >
+                        <Printer className="w-3.5 h-3.5 text-amber-400" />
+                        طراحی کارت
+                      </button>
+                      
+                      <button type="button"
+                        onClick={printPostalCard}
+                        className="text-[10px] bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-rose-500/25 active:scale-95"
+                        title="پرینت فوری کارت"
+                      >
+                        <FileText className="w-3.5 h-3.5 text-rose-400" />
+                        پرینت فوری
+                      </button>
 
-                    <div className="grid grid-cols-3 gap-1.5 mt-2">
                       <button type="button"
                         onClick={downloadStandaloneQR}
-                        className="text-[9px] bg-black/40 hover:bg-black/60 text-slate-300 hover:text-white font-bold py-1.5 px-1 rounded-lg transition-all flex flex-col items-center justify-center gap-1 cursor-pointer border border-white/10"
+                        className="text-[10px] bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-white/10 active:scale-95"
                         title="دانلود تصویر خام کد QR"
                       >
-                        <Download className="w-3 h-3 text-pink-400" />
+                        <Download className="w-3.5 h-3.5 text-slate-400" />
                         ذخیره QR
                       </button>
+
                       <button type="button"
                         onClick={handleNativeShare}
-                        className="text-[9px] bg-black/40 hover:bg-black/60 text-slate-300 hover:text-white font-bold py-1.5 px-1 rounded-lg transition-all flex flex-col items-center justify-center gap-1 cursor-pointer border border-white/10"
+                        className="text-[10px] bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-white/10 active:scale-95"
                         title="ارسال لینک رویداد"
                       >
-                        <Share2 className="w-3 h-3 text-sky-400" />
+                        <Share2 className="w-3.5 h-3.5 text-sky-400" />
                         ارسال لینک
                       </button>
                     </div>
                   </div>
                 </div>
+
               </div>
 
               {/* Event Analytics Dashboard */}
-              <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl space-y-6" id="event_analytics_deck" dir="rtl">
+              <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-6" id="event_analytics_deck" dir="rtl">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                   <div>
                     <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
@@ -1138,11 +1297,11 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                     </p>
                   </div>
                   <div className="flex gap-4">
-                    <div className="bg-black/30 border border-white/10 rounded-xl px-4 py-2 shrink-0 text-center">
+                    <div className="bg-black/40 border border-white/5 rounded-xl px-4 py-2 shrink-0 text-center">
                       <div className="text-[10px] text-slate-400 font-mono tracking-widest uppercase mb-1">فضای مصرفی</div>
                       <div className="text-lg font-bold text-white font-mono" dir="ltr">{analyticsData.totalStorage}</div>
                     </div>
-                    <div className="bg-black/30 border border-white/10 rounded-xl px-4 py-2 shrink-0 text-center">
+                    <div className="bg-black/40 border border-white/5 rounded-xl px-4 py-2 shrink-0 text-center">
                       <div className="text-[10px] text-slate-400 font-mono tracking-widest uppercase mb-1">مهمانان فعال</div>
                       <div className="text-lg font-bold text-pink-300 font-mono" dir="ltr">{analyticsData.totalGuests}</div>
                     </div>
@@ -1151,7 +1310,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Upload Timeline Area Chart */}
-                  <div className="lg:col-span-2 p-4 rounded-xl bg-black/30 border border-white/10 h-[260px] flex flex-col">
+                  <div className="lg:col-span-2 p-4 rounded-xl bg-black/40 border border-white/5 h-[260px] flex flex-col">
                     <h4 className="text-[11px] font-bold text-slate-400 tracking-widest mb-4 flex items-center justify-between">
                       <span>نمودار دریافت فایل (امروز)</span>
                     </h4>
@@ -1180,7 +1339,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                   </div>
 
                   {/* Guest Contributions Bar Chart */}
-                  <div className="p-4 rounded-xl bg-black/30 border border-white/10 h-[260px] flex flex-col">
+                  <div className="p-4 rounded-xl bg-black/40 border border-white/5 h-[260px] flex flex-col">
                     <h4 className="text-[11px] font-bold text-slate-400 tracking-widest mb-4">بیشترین مشارکت</h4>
                     {analyticsData.guestCounts.length > 0 ? (
                       <ResponsiveContainer width="100%" height="100%" dir="ltr">
@@ -1202,8 +1361,47 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                 </div>
               </div>
 
+              {/* Face Recognition & Sync */}
+              <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-4" id="face_recognition_deck" dir="rtl">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-teal-400" />
+                      شناسایی چهره
+                    </h3>
+                    <p className="text-xs text-slate-300 mt-1">تشخیص خودکار چهره در عکس‌ها و گروه‌بندی بر اساس افراد</p>
+                  </div>
+                  <button type="button"
+                    onClick={handleSyncFaces}
+                    disabled={isSyncingFaces}
+                    className="bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 font-bold shadow-lg disabled:opacity-50 cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFaces ? 'animate-spin' : ''}`} />
+                    {isSyncingFaces ? 'در حال پردازش...' : 'شروع شناسایی چهره'}
+                  </button>
+                </div>
+                {faceProfiles.length > 0 && (
+                  <div className="bg-black/30 rounded-xl p-3 border border-white/10">
+                    <p className="text-xs text-slate-400 mb-2">{faceProfiles.length} پروفایل چهره شناسایی شد</p>
+                    <div className="flex flex-wrap gap-2">
+                      {faceProfiles.map((p: any) => (
+                        <div key={p.personId} className="flex items-center gap-2 bg-white/10 rounded-lg px-3 py-1.5 border border-white/10">
+                          {p.avatarUrl ? (
+                            <img src={p.avatarUrl} className="w-6 h-6 rounded-full object-cover" alt="" />
+                          ) : (
+                            <User className="w-4 h-4 text-teal-400" />
+                          )}
+                          <span className="text-xs text-white">{p.displayName}</span>
+                          <span className="text-[10px] text-slate-400 bg-black/30 px-1.5 py-0.5 rounded-full">{p.photoCount || 0} عکس</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Dynamic Local Save & Hot-Swap Sync Host controls */}
-              <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl space-y-6" id="save_and_sync_deck">
+              <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-6" id="save_and_sync_deck">
                 <div>
                   <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
                     <Folder className="w-5 h-5 text-pink-400" />
@@ -1214,32 +1412,32 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-6 p-4 rounded-xl bg-black/30 border border-white/10">
+                <div className="grid grid-cols-1 gap-6 p-4 rounded-xl bg-black/40 border border-white/5">
                   {/* Left sync controls */}
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-semibold text-slate-350 mb-1">
-                        Active Server-Side Save Directory:
+                      <label className="block text-xs font-semibold text-slate-350 mb-1" dir="rtl">
+                        مسیر اصلی ذخیره‌سازی فایل‌ها روی سیستم / هارد اکسترنال:
                       </label>
                       <div className="flex gap-2">
                         <input
                           type="text"
-                          className="flex-1 bg-black/30 border border-white/10 rounded-lg py-1.5 px-3 text-xs font-mono text-white focus:outline-hidden focus:ring-1 focus:ring-pink-500"
+                          className="flex-1 bg-black/40 border border-white/5 rounded-lg py-1.5 px-3 text-xs font-mono text-white focus:outline-hidden focus:ring-1 focus:ring-pink-500"
                           value={activeSyncDir}
                           onChange={(e) => {
                             setActiveSyncDir(e.target.value);
                           }}
-                          placeholder="e.g. C:/EventMedia/Weddings"
+                          placeholder="e.g. D:\Wedding or E:\External_SSD"
                         />
                         <button type="button"
                           onClick={() => handleUpdateSyncSettings({ saveDirectory: activeSyncDir })}
-                          className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs px-3 rounded-lg font-medium transition-all cursor-pointer"
+                          className="bg-pink-600/30 hover:bg-pink-600/50 border border-pink-500/40 text-pink-200 text-xs px-3 rounded-lg font-medium transition-all cursor-pointer"
                         >
-                          Save Path
+                          ثبت مسیر جدید
                         </button>
                       </div>
-                      <p className="text-[10px] text-slate-450 mt-1">
-                        Any relative path saves locally in your sandbox folder. Absolute paths (e.g. <code className="bg-purple-950/20 text-purple-300 px-1 rounded font-mono text-[9px] border border-purple-500/10">/var/data</code>) attempt disk writes on the server container.
+                      <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed" dir="rtl">
+                        💡 <strong>نکته هارد اکسترنال:</strong> مسیر پیش‌فرض <code className="bg-purple-950/40 text-purple-300 px-1 py-0.5 rounded font-mono text-[9px] border border-purple-500/20">D:\Wedding</code> است. در صورت اتصال اس‌اس‌دی یا هارد اکسترنال (مثلاً درایو <code className="bg-purple-950/40 text-purple-300 px-1 py-0.5 rounded font-mono text-[9px] border border-purple-500/20">E:\Wedding</code>)، کافیست مسیر را تغییر داده و روی «ثبت مسیر جدید» کلیک کنید.
                       </p>
                     </div>
 
@@ -1328,8 +1526,8 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               </div>
 
               {/* Uploaded Media items overview */}
-              <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-6 shadow-2xl space-y-4" id="uploaded_grid_deck">
-                <div className="flex items-center justify-between border-b border-white/10 pb-3" dir="rtl">
+              <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-4" id="uploaded_grid_deck">
+                <div className="flex items-center justify-between border-b border-white/10 pb-3 gap-2 flex-wrap" dir="rtl">
                   <div>
                     <h3 className="text-base font-display font-medium text-white">
                       دیوار عکس‌های مراسم ({mediaItems.length} فایل)
@@ -1337,13 +1535,61 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                     <p className="text-xs text-slate-350 mt-0.5">مشاهده عکس‌ها و مدیریت فایل‌ها</p>
                   </div>
                   
-                  <button type="button"
-                    onClick={() => fetchMedia(selectedEventId)} 
-                    className="p-1.5 text-slate-300 hover:text-white rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
-                    title="به روز رسانی گالری"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {selectMode ? (
+                      <>
+                        <button type="button"
+                          onClick={selectAllVisibleMedia}
+                          className="text-xs px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-slate-200 transition-all cursor-pointer border border-white/10 flex items-center gap-1.5"
+                        >
+                          <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
+                          انتخاب همه
+                        </button>
+                        {selectedIds.size > 0 && (
+                          <button type="button"
+                            onClick={deselectAllMedia}
+                            className="text-xs px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-slate-300 transition-all cursor-pointer border border-white/10"
+                          >
+                            لغو انتخاب
+                          </button>
+                        )}
+                        <button type="button"
+                          onClick={handleDeleteSelectedMedia}
+                          disabled={selectedIds.size === 0 || isBatchDeleting}
+                          className="text-xs px-3.5 py-1.5 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 border border-rose-500/30 text-white rounded-xl transition-all cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5 font-bold shadow-lg"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          حذف ({selectedIds.size})
+                        </button>
+                        <button type="button"
+                          onClick={() => { deselectAllMedia(); setSelectMode(false); }}
+                          className="p-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-slate-300 cursor-pointer transition-all border border-white/10"
+                          title="بستن حالت انتخاب"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {mediaItems.length > 0 && (
+                          <button type="button"
+                            onClick={() => setSelectMode(true)}
+                            className="text-xs px-3.5 py-1.5 bg-white/10 hover:bg-white/20 border border-white/15 text-rose-300 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 font-medium"
+                          >
+                            <CheckSquare className="w-3.5 h-3.5" />
+                            انتخاب چندتایی
+                          </button>
+                        )}
+                        <button type="button"
+                          onClick={() => fetchMedia(selectedEventId)} 
+                          className="p-1.5 text-slate-300 hover:text-white rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
+                          title="به روز رسانی گالری"
+                        >
+                          <RefreshCw className="w-4 h-4" />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 {mediaItems.length === 0 ? (
@@ -1356,8 +1602,31 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4" id="admin_media_grid">
-                    {mediaItems.map((m, idx) => (
-                      <div key={m.id} onClick={() => setActiveLightboxIndex(idx)} className="relative group bg-white/5 border border-white/15 rounded-xl overflow-hidden flex flex-col justify-between shadow-lg hover:border-pink-500/40 transition-all font-sans cursor-pointer">
+                    {mediaItems.map((m, idx) => {
+                      const isSelected = selectedIds.has(m.id);
+                      return (
+                        <div 
+                          key={m.id} 
+                          onClick={() => {
+                            if (selectMode) toggleSelectMedia(m.id);
+                            else setActiveLightboxIndex(idx);
+                          }} 
+                          className={`relative group bg-white/5 border rounded-xl overflow-hidden flex flex-col justify-between shadow-lg transition-all font-sans cursor-pointer ${
+                            isSelected 
+                              ? "ring-2 ring-rose-500 border-rose-500/80 bg-rose-500/10" 
+                              : "border-white/15 hover:border-pink-500/40"
+                          }`}
+                        >
+                          {/* Selection Checkbox Overlay */}
+                          {selectMode && (
+                            <div className="absolute top-2 left-2 z-20">
+                              <div className={`w-6 h-6 rounded-lg flex items-center justify-center border-2 transition-all shadow-md ${
+                                isSelected ? "bg-rose-500 border-rose-400" : "bg-black/60 border-white/50"
+                              }`}>
+                                <Check className={`w-3.5 h-3.5 ${isSelected ? "text-white" : "text-transparent"}`} strokeWidth={3} />
+                              </div>
+                            </div>
+                          )}
                         
                         {/* Media display content */}
                         <div className="relative aspect-square w-full bg-slate-950 flex items-center justify-center overflow-hidden">
@@ -1441,13 +1710,14 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                           </div>
                         </div>
                       </div>
-                    ))}
+                    );
+                  })}
                   </div>
                 )}
               </div>
             </>
           ) : (
-            <div className="backdrop-blur-xl bg-white/10 border border-white/20 rounded-3xl p-12 text-center shadow-2xl flex flex-col items-center justify-center space-y-4" id="workspace_empty" dir="rtl">
+            <div className="glass-card rounded-3xl p-12 text-center shadow-2xl flex flex-col items-center justify-center space-y-4" id="workspace_empty" dir="rtl">
               <QrCode className="w-16 h-16 text-pink-400 shrink-0 stroke-1 animate-pulse" />
               <div>
                 <h3 className="text-lg font-display font-medium text-white">یک رویداد ایجاد کنید یا انتخاب کنید</h3>
@@ -1612,87 +1882,316 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         </div>
       )}
 
-      {/* Card Studio Modal */}
+      {/* Card Studio Modal — Redesigned for Fatemeh & Hamid */}
       {showCardStudio && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="backdrop-blur-3xl bg-slate-900/95 rounded-3xl w-full max-w-2xl overflow-hidden border border-white/20 shadow-2xl flex flex-col max-h-[90vh]">
-            <div className="bg-white/5 border-b border-white/10 p-4 flex items-center justify-between">
-              <h3 className="text-lg font-display font-medium text-white flex items-center gap-2">
-                <Printer className="w-5 h-5 text-pink-400" />
-                Card Studio
-              </h3>
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xl flex items-center justify-center p-3 md:p-6 z-50 animate-fade-in font-sans" dir="rtl">
+          <div className="backdrop-blur-3xl bg-[#20141a]/95 rounded-3xl w-full max-w-4xl overflow-hidden border border-amber-500/30 shadow-2xl flex flex-col max-h-[92vh]">
+            
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-transparent border-b border-white/10 p-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-amber-500/20 rounded-xl border border-amber-500/30">
+                  <Printer className="w-5 h-5 text-amber-300" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    کارگاه اختصاصی کارت دعوت و پرینت (Card Studio)
+                  </h3>
+                  <p className="text-[10px] text-amber-200/80 mt-0.5">
+                    طراحی کارت دعوت شیک برای {selectedEvent?.name || "مراسم عروسی فاطمه و حمید"}
+                  </p>
+                </div>
+              </div>
               <button type="button" onClick={() => setShowCardStudio(false)}
-                className="p-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-white/60 hover:text-white transition-all cursor-pointer">
+                className="p-2 bg-white/5 hover:bg-white/15 rounded-xl text-white/70 hover:text-white transition-all cursor-pointer border border-white/10">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-4 overflow-y-auto space-y-4">
-              <div className="bg-white/5 rounded-xl p-4 border border-white/10 space-y-3">
-                <h4 className="text-sm font-semibold text-white">Print Settings</h4>
-                <div className="flex flex-wrap gap-3">
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">Paper Size</label>
-                    <select value={cardPaperSize} onChange={e => setCardPaperSize(e.target.value)}
-                      className="bg-white/10 border border-white/20 text-white text-xs rounded-lg px-2 py-1.5">
-                      {Object.entries(PAPER_SIZES).map(([k, v]) => (
-                        <option key={k} value={k}>{v.label} ({v.width}×{v.height}")</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">Orientation</label>
-                    <div className="flex gap-1">
-                      <button type="button" onClick={() => setCardOrientation('portrait')}
-                        className={`text-xs px-2 py-1.5 rounded-lg border ${cardOrientation === 'portrait' ? 'bg-blue-600/30 border-blue-500/50 text-blue-300' : 'bg-white/10 border-white/20 text-white/60'}`}>
-                        Portrait
-                      </button>
-                      <button type="button" onClick={() => setCardOrientation('landscape')}
-                        className={`text-xs px-2 py-1.5 rounded-lg border ${cardOrientation === 'landscape' ? 'bg-blue-600/30 border-blue-500/50 text-blue-300' : 'bg-white/10 border-white/20 text-white/60'}`}>
-                        Landscape
-                      </button>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">Bleed</label>
-                    <button type="button" onClick={() => setCardShowBleed(p => !p)}
-                      className={`text-xs px-2 py-1.5 rounded-lg border ${cardShowBleed ? 'bg-emerald-600/30 border-emerald-500/50 text-emerald-300' : 'bg-white/10 border-white/20 text-white/60'}`}>
-                      3mm {cardShowBleed ? 'ON' : 'OFF'}
+
+            {/* Modal Content Body: Grid Layout */}
+            <div className="p-5 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+              
+              {/* Left Column (Lg: 7 cols): Controls & Inputs */}
+              <div className="lg:col-span-7 space-y-4">
+                
+                {/* 1. Theme Presets Selection */}
+                <div className="bg-white/5 rounded-2xl p-3.5 border border-white/10 space-y-2.5">
+                  <h4 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    انتخاب قالب و استایل کارت
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCardTheme("cream")}
+                      className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${cardTheme === "cream" ? "bg-amber-500/20 border-amber-400 ring-2 ring-amber-400/40 text-amber-200" : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20"}`}
+                    >
+                      <span className="text-xs font-bold flex items-center justify-between">
+                        👑 عاجی و طلا
+                        <span className="w-3 h-3 rounded-full bg-[#faf6ee] border border-[#c2933d] inline-block" />
+                      </span>
+                      <span className="text-[9px] text-slate-400">کاغذ عاجی با حاشیه طلایی کلاسیک</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCardTheme("slate")}
+                      className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${cardTheme === "slate" ? "bg-rose-500/20 border-rose-400 ring-2 ring-rose-400/40 text-rose-200" : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20"}`}
+                    >
+                      <span className="text-xs font-bold flex items-center justify-between">
+                        🍷 رز و مخمل
+                        <span className="w-3 h-3 rounded-full bg-[#120a1c] border border-[#f43f5e] inline-block" />
+                      </span>
+                      <span className="text-[9px] text-slate-400">زمینه مخمل سورمه‌ای با رز گلد</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCardTheme("sage")}
+                      className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${cardTheme === "sage" ? "bg-emerald-500/20 border-emerald-400 ring-2 ring-emerald-400/40 text-emerald-200" : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20"}`}
+                    >
+                      <span className="text-xs font-bold flex items-center justify-between">
+                        🌿 زیتونی و طراوت
+                        <span className="w-3 h-3 rounded-full bg-[#f4f6f4] border border-[#2d4a34] inline-block" />
+                      </span>
+                      <span className="text-[9px] text-slate-400">سبز طراوت‌بخش با قاب طبیعی</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCardTheme("neon")}
+                      className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${cardTheme === "neon" ? "bg-purple-500/20 border-purple-400 ring-2 ring-purple-400/40 text-purple-200" : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20"}`}
+                    >
+                      <span className="text-xs font-bold flex items-center justify-between">
+                        🔮 شب و نئون
+                        <span className="w-3 h-3 rounded-full bg-[#0a0710] border border-[#c084fc] inline-block" />
+                      </span>
+                      <span className="text-[9px] text-slate-400">زمینه مشکی با خطوط نئونی بنفش</span>
                     </button>
                   </div>
                 </div>
-              </div>
-              <div id="card-preview" className={`relative mx-auto ${cardOrientation === 'portrait' ? 'max-w-[320px]' : 'max-w-[420px]'}`}
-                style={{ aspectRatio: cardOrientation === 'portrait' ? `${PAPER_SIZES[cardPaperSize].width}/${PAPER_SIZES[cardPaperSize].height}` : `${PAPER_SIZES[cardPaperSize].height}/${PAPER_SIZES[cardPaperSize].width}` }}>
-                <div className="w-full h-full bg-white rounded-xl overflow-hidden shadow-lg relative">
-                  {cardShowBleed && (
-                    <div className="absolute inset-0 border-2 border-dashed border-red-400/50 rounded-xl m-[3mm] pointer-events-none z-10" />
-                  )}
-                  <div className="p-4 h-full flex flex-col items-center justify-center gap-2 text-gray-900">
-                    {qrCodeDataUrl && <img src={qrCodeDataUrl} className="w-24 h-24" alt="QR" />}
-                    <p className="text-xs font-semibold text-center leading-tight">{selectedEvent?.name || 'Event Name'}</p>
-                    <p className="text-[10px] text-gray-500 text-center leading-tight">
-                      {guestLink.replace(/.*\//, '') || 'party/event-id'}
-                    </p>
-                    <p className="text-[8px] text-gray-400 mt-auto">Scan to upload photos</p>
+
+                {/* 2. Paper & Layout Settings */}
+                <div className="bg-white/5 rounded-2xl p-3.5 border border-white/10 space-y-2.5">
+                  <h4 className="text-xs font-bold text-amber-300">تنظیمات پرینت و ابعاد کاغذ</h4>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">اندازه کاغذ</label>
+                      <select 
+                        value={cardPaperSize} 
+                        onChange={e => setCardPaperSize(e.target.value)}
+                        className="bg-black/50 border border-white/15 text-white text-xs rounded-xl px-3 py-1.5 focus:border-amber-400 outline-none"
+                      >
+                        {Object.entries(PAPER_SIZES).map(([k, v]) => (
+                          <option key={k} value={k} className="bg-slate-900 text-white">{v.label} ({v.width}×{v.height}")</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">جهت کارت</label>
+                      <div className="flex gap-1">
+                        <button type="button" onClick={() => setCardOrientation('portrait')}
+                          className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${cardOrientation === 'portrait' ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-bold' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                          عمودی
+                        </button>
+                        <button type="button" onClick={() => setCardOrientation('landscape')}
+                          className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${cardOrientation === 'landscape' ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-bold' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                          افقی
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">راهنمای برش (Bleed)</label>
+                      <button type="button" onClick={() => setCardShowBleed(p => !p)}
+                        className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${cardShowBleed ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300 font-bold' : 'bg-white/5 border-white/10 text-slate-400'}`}>
+                        ۳ میلی‌متر {cardShowBleed ? 'فعال' : 'غیرفعال'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 3. Customizable Card Content Inputs */}
+                <div className="bg-white/5 rounded-2xl p-3.5 border border-white/10 space-y-3">
+                  <h4 className="text-xs font-bold text-amber-300">محتوا و متن‌های کارت</h4>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">پیام خوش‌آمدگویی اولیه</label>
+                      <input 
+                        type="text" 
+                        value={cardGreeting} 
+                        onChange={e => setCardGreeting(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-400 block mb-1">عنوان اصلی رویداد</label>
+                      <input 
+                        type="text" 
+                        value={cardTitle} 
+                        onChange={e => setCardTitle(e.target.value)}
+                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">زیرعنوان و شعار دعوت</label>
+                    <input 
+                      type="text" 
+                      value={cardSubtitle} 
+                      onChange={e => setCardSubtitle(e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">راهنمای مهمانان در کارت</label>
+                    <textarea 
+                      rows={2}
+                      value={cardInstructions} 
+                      onChange={e => setCardInstructions(e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none resize-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 block mb-1">پانویس کارت (امضا/تاریخ)</label>
+                    <input 
+                      type="text" 
+                      value={cardFooter} 
+                      onChange={e => setCardFooter(e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
+                    />
+                  </div>
+
+                  {/* Couple Photo Upload Option */}
+                  <div className="pt-2 border-t border-white/10 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="checkbox" 
+                        id="show_couple_photo_check"
+                        checked={showCouplePhoto} 
+                        onChange={e => setShowCouplePhoto(e.target.checked)}
+                        className="rounded accent-amber-500 cursor-pointer"
+                      />
+                      <label htmlFor="show_couple_photo_check" className="text-xs text-slate-200 cursor-pointer">
+                        نمایش تصویر زوج در کارت
+                      </label>
+                    </div>
+                    {showCouplePhoto && (
+                      <label className="text-[10px] bg-white/10 hover:bg-white/20 border border-white/15 text-amber-200 px-3 py-1 rounded-lg cursor-pointer transition-all">
+                        آپلود عکس زوج
+                        <input type="file" accept="image/*" onChange={handleCardImageUpload} className="hidden" />
+                      </label>
+                    )}
                   </div>
                 </div>
               </div>
-              <div className="flex gap-2 justify-center">
-                <button type="button"
-                  onClick={() => { setShowCardStudio(false); setTimeout(() => window.print(), 100); }}
-                  className="bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">
-                  🖨 Print Card
-                </button>
-                <button type="button"
-                  onClick={() => { setShowCardStudio(false); setTimeout(() => window.print(), 100); }}
-                  className="bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs px-3 py-1.5 rounded-lg transition-all cursor-pointer">
-                  Download
-                </button>
+
+              {/* Right Column (Lg: 5 cols): Real-Time Live Card Preview */}
+              <div className="lg:col-span-5 flex flex-col items-center justify-center space-y-4">
+                <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5 self-start">
+                  <Eye className="w-3.5 h-3.5 text-amber-400" />
+                  پیش‌نمایش زنده کارت دعوت
+                </span>
+
+                <div 
+                  id="card-preview" 
+                  className={`w-full transition-all duration-300 ${cardOrientation === 'portrait' ? 'max-w-[310px]' : 'max-w-[400px]'}`}
+                  style={{ aspectRatio: cardOrientation === 'portrait' ? `${PAPER_SIZES[cardPaperSize].width}/${PAPER_SIZES[cardPaperSize].height}` : `${PAPER_SIZES[cardPaperSize].height}/${PAPER_SIZES[cardPaperSize].width}` }}
+                >
+                  <div 
+                    className={`w-full h-full rounded-2xl overflow-hidden shadow-2xl relative flex flex-col justify-between p-5 text-center transition-all ${
+                      cardTheme === 'cream' ? 'bg-[#faf6ee] text-[#1a202c] border-4 border-double border-[#c2933d]' :
+                      cardTheme === 'slate' ? 'bg-gradient-to-b from-[#120a1c] to-[#090d16] text-white border-2 border-rose-500/40' :
+                      cardTheme === 'sage' ? 'bg-[#f4f6f4] text-[#1e3022] border-4 border-double border-[#2d4a34]' :
+                      'bg-[#0a0710] text-white border-4 border-purple-500/50 shadow-[0_0_20px_rgba(192,132,252,0.3)]'
+                    }`}
+                  >
+                    {cardShowBleed && (
+                      <div className="absolute inset-0 border-2 border-dashed border-red-400/40 rounded-2xl m-[3mm] pointer-events-none z-10" />
+                    )}
+
+                    {/* Card Preview Header */}
+                    <div>
+                      <p className={`text-[9px] font-bold tracking-widest uppercase ${cardTheme === 'cream' ? 'text-[#b45309]' : cardTheme === 'sage' ? 'text-[#3f5e46]' : 'text-rose-400'}`}>
+                        {cardGreeting}
+                      </p>
+                      <h2 className="text-base font-bold mt-1 leading-tight font-display">
+                        {cardTitle || "مراسم عروسی فاطمه و حمید"}
+                      </h2>
+                      <p className="text-[9.5px] opacity-80 mt-0.5 font-medium">
+                        {cardSubtitle}
+                      </p>
+                      <div className={`w-16 h-0.5 mx-auto my-2 rounded-full ${cardTheme === 'cream' ? 'bg-[#c2933d]/40' : cardTheme === 'sage' ? 'bg-[#2d4a34]/40' : 'bg-rose-500/40'}`} />
+                    </div>
+
+                    {/* QR Code Container in Card */}
+                    <div className="relative my-2 inline-block mx-auto">
+                      <div className="bg-white p-2.5 rounded-2xl shadow-lg border border-black/10 inline-block relative">
+                        {showCouplePhoto && cardCustomImage ? (
+                          <div className="relative">
+                            <img src={cardCustomImage} alt="Couple" className="w-28 h-28 object-cover rounded-xl shadow-xs" />
+                            {qrCodeDataUrl && (
+                              <div className="absolute bottom-1 right-1 bg-white p-1 rounded-lg shadow-md border border-slate-200">
+                                <img src={qrCodeDataUrl} className="w-9 h-9" alt="QR" />
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          qrCodeDataUrl && <img src={qrCodeDataUrl} className="w-28 h-28 rounded-lg" alt="QR" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Card Instructions & Footer */}
+                    <div>
+                      <p className="text-[9px] leading-relaxed max-w-[90%] mx-auto opacity-90 font-medium">
+                        {cardInstructions}
+                      </p>
+                      <p className={`text-[8.5px] mt-2 font-bold opacity-75 ${cardTheme === 'cream' ? 'text-[#8a734e]' : cardTheme === 'sage' ? 'text-[#2d4a34]' : 'text-rose-300'}`}>
+                        {cardFooter}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Print & Download Action Buttons */}
+                <div className="w-full space-y-2 pt-2">
+                  <button type="button"
+                    onClick={() => { setShowCardStudio(false); printPostalCard(); }}
+                    className="w-full bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg active:scale-95">
+                    <Printer className="w-4 h-4" />
+                    پرینت مستقیم کارت (Print)
+                  </button>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button"
+                      onClick={() => { downloadPostalCard(); }}
+                      className="bg-white/10 hover:bg-white/20 border border-white/15 text-slate-200 text-[11px] font-bold py-2 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5">
+                      <Download className="w-3.5 h-3.5 text-emerald-400" />
+                      دانلود PNG کیفیت بالا
+                    </button>
+
+                    <button type="button"
+                      onClick={() => { downloadStandaloneQR(); }}
+                      className="bg-white/10 hover:bg-white/20 border border-white/15 text-slate-200 text-[11px] font-bold py-2 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5">
+                      <QrCode className="w-3.5 h-3.5 text-sky-400" />
+                      دانلود کد QR خام
+                    </button>
+                  </div>
+                </div>
+
               </div>
+
             </div>
           </div>
         </div>
       )}
+
 
       {activeLightboxIndex !== null && mediaItems[activeLightboxIndex] && (
         <div

@@ -15,6 +15,7 @@ import pinoHttp from "pino-http";
 import session from "express-session";
 import bcrypt from "bcryptjs";
 import cors from "cors";
+import { exec } from "child_process";
 import * as db from "./db.js";
 import { logger } from "./logger.js";
 import { getStorageProvider } from "./storage.js";
@@ -70,7 +71,6 @@ async function setupAdmin() {
     await sqlite.run('INSERT INTO admins (id, username, passwordHash, isSuperuser) VALUES (?, ?, ?, 1)', uuidv4(), username, hash);
     logger.info(`Superuser admin created. Login with username: ${username}`);
   } else {
-    // Only re-hash if password actually changed
     const match = await bcrypt.compare(password, admin.passwordHash);
     if (!match) {
       const hash = await bcrypt.hash(password, 10);
@@ -80,10 +80,10 @@ async function setupAdmin() {
   }
 }
 
-// Seed the wedding event for quick-join
+// Seed the wedding event for quick-join with D:\Wedding default save directory
 async function setupWeddingEvent() {
   const sqlite = await db.getDb();
-  const event = await sqlite.get('SELECT id FROM events WHERE id = ?', 'fatemeh-hamid');
+  const event = await sqlite.get('SELECT id, saveDirectory FROM events WHERE id = ?', 'fatemeh-hamid');
   if (!event) {
     await db.createOrUpdateEvent({
       id: "fatemeh-hamid",
@@ -96,17 +96,53 @@ async function setupWeddingEvent() {
       imageLimit: 0,
       videoLimit: 0,
       maxVideoDuration: 0,
-      saveDirectory: "./uploads",
+      saveDirectory: "D:\\Wedding",
       localSyncHost: "http://localhost:8080",
       localSyncEnabled: false
     });
-    logger.info("Universal quick-join 'fatemeh-hamid' event has been provisioned.");
+    logger.info("Universal quick-join 'fatemeh-hamid' event provisioned with D:\\Wedding save directory.");
+  } else if (!event.saveDirectory || event.saveDirectory === "./uploads") {
+    await sqlite.run('UPDATE events SET saveDirectory = ? WHERE id = ?', 'D:\\Wedding', 'fatemeh-hamid');
+    logger.info("Updated 'fatemeh-hamid' event saveDirectory to D:\\Wedding.");
   }
 }
 
-// Ensure Uploads folder
+// Ensure Uploads folder fallback
 const uploadsBaseDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadsBaseDir)) fs.mkdirSync(uploadsBaseDir, { recursive: true });
+
+/**
+ * Returns the face index output directory for a given saveDirectory.
+ * By default: <saveDirectory>\Face_Index  (e.g. D:\Wedding\Face_Index)
+ * Falls back to ./face-index in the project root if no saveDirectory is set.
+ */
+function getFaceIndexDir(saveDirectory?: string): string {
+  if (saveDirectory) {
+    return path.join(saveDirectory, "Face_Index");
+  }
+  return path.join(process.cwd(), "face-index");
+}
+
+/**
+ * Returns the face crops (avatar thumbnails) directory for a given saveDirectory.
+ */
+function getFaceCropsDir(saveDirectory?: string): string {
+  return path.join(getFaceIndexDir(saveDirectory), "faces");
+}
+
+/**
+ * Reads the primary event's saveDirectory from the DB.
+ * Used at runtime so hot-swapped SSD paths are always current.
+ */
+async function getPrimarySaveDirectory(): Promise<string | undefined> {
+  try {
+    const sqlite = await db.getDb();
+    const event = await sqlite.get('SELECT saveDirectory FROM events WHERE id = ?', 'fatemeh-hamid');
+    return event?.saveDirectory || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 // --- MIDDLEWARES ---
 
@@ -166,6 +202,74 @@ const requireAdmin = (req: any, res: any, next: any) => {
 };
 
 app.use("/uploads", express.static(uploadsBaseDir, { maxAge: "30d" }));
+
+// Dynamic /face-crops route: resolves to event saveDirectory\Face_Index\faces at request time
+// This ensures hot-swapped SSD paths (D:\Wedding -> E:\Wedding) are always reflected.
+app.use("/face-crops", async (req: any, res: any, next: any) => {
+  const saveDir = await getPrimarySaveDirectory();
+  const cropsDir = getFaceCropsDir(saveDir);
+  if (!fs.existsSync(cropsDir)) {
+    fs.mkdirSync(cropsDir, { recursive: true });
+  }
+  express.static(cropsDir, { maxAge: "7d" })(req, res, next);
+});
+
+// Background Face Indexing Runner (InsightFace - CPU optimized)
+let isIndexingFaces = false;
+async function triggerFaceIndexer() {
+  if (isIndexingFaces) {
+    logger.info("Face indexing already in progress, skipping...");
+    return;
+  }
+  isIndexingFaces = true;
+  try {
+    const pythonCmd = process.platform === "win32" ? "python" : "python3";
+    const scriptPath = path.join(process.cwd(), "scripts", "face_recognizer_insightface.py");
+
+    // Collect all unique saveDirectories from the DB
+    const inputDirs = [uploadsBaseDir];
+    let primarySaveDir: string | undefined;
+    try {
+      const sqlite = await db.getDb();
+      const events = await sqlite.all('SELECT saveDirectory FROM events WHERE saveDirectory IS NOT NULL');
+      for (const ev of events) {
+        if (ev.saveDirectory && !inputDirs.includes(ev.saveDirectory)) {
+          inputDirs.push(ev.saveDirectory);
+          if (!primarySaveDir) primarySaveDir = ev.saveDirectory; // first event dir is primary
+        }
+      }
+    } catch (err) {
+      logger.warn(`Could not query saveDirectories for face indexing: ${err}`);
+    }
+
+    // Output dir is always <primarySaveDirectory>\Face_Index or fallback to ./face-index
+    const outputDir = getFaceIndexDir(primarySaveDir);
+    if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
+
+    const formattedDirs = inputDirs.map(d => `"${d}"`).join(" ");
+    // Using InsightFace buffalo_l model with 0.6 threshold (cosine distance) for better accuracy
+    const cmd = `${pythonCmd} "${scriptPath}" --input-dir ${formattedDirs} --output-dir "${outputDir}" --tolerance 0.6 --max-size 800`;
+    logger.info(`Launching InsightFace indexer: output=${outputDir}`);
+
+    exec(cmd, { 
+      maxBuffer: 1024 * 1024 * 10,
+      env: { ...process.env, PYTHONIOENCODING: "utf-8" }
+    }, (error, stdout, stderr) => {
+      isIndexingFaces = false;
+      if (error) {
+        logger.warn(`Face indexing background runner notice: ${error.message}`);
+        logger.warn(`Face indexer stderr: ${stderr?.substring(0, 500)}`);
+      } else {
+        logger.info(`Background face indexing completed successfully.`);
+        const lines = stdout?.trim().split('\n').slice(-5).join('\n');
+        logger.info(`Face indexer summary:\n${lines}`);
+      }
+    });
+  } catch (err) {
+    isIndexingFaces = false;
+    logger.error(`Error triggering face indexer: ${err}`);
+  }
+}
 
 // Dynamic thumbnail generation: if a .webp thumbnail is requested but doesn't exist,
 // generate it from the original image on-the-fly and cache it for future requests
@@ -587,6 +691,9 @@ app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), as
 
     res.json(mediaItem);
     broadcastEvent('media:uploaded', { eventId, media: mediaItem });
+
+    // Trigger face recognition indexing in background 3s after upload
+    setTimeout(triggerFaceIndexer, 3000);
   } catch (err: any) {
     if (err.message && err.message.includes('Invalid file type')) return res.status(400).json({ error: err.message });
     next(err);
@@ -705,6 +812,39 @@ app.get("/api/events/:id/download-zip", requireAdmin, async (req: any, res: any,
   } catch (err) { next(err); }
 });
 
+app.get("/api/events/:id/face-profiles", async (req: any, res: any, next: any) => {
+  try {
+    // Resolve face_index.json from the event's saveDirectory (dynamic hot-swap support)
+    const saveDir = await getPrimarySaveDirectory();
+    const faceIdxDir = getFaceIndexDir(saveDir);
+    const jsonPath = path.join(faceIdxDir, "face_index.json");
+    if (!fs.existsSync(jsonPath)) {
+      return res.json({ profiles: [], totalFaces: 0, lastUpdated: 0 });
+    }
+    const content = fs.readFileSync(jsonPath, "utf8");
+    const data = JSON.parse(content);
+
+    const profiles = (data.persons || []).map((p: any) => ({
+      personId: p.personId,
+      displayName: p.displayName || p.personId,
+      photoCount: p.photoCount,
+      avatarUrl: p.sampleThumbnailName ? `/face-crops/${p.sampleThumbnailName}` : "",
+      photoNames: p.photos || []
+    }));
+
+    res.json({
+      profiles,
+      totalFaces: data.totalFacesDetected || 0,
+      lastUpdated: data.lastUpdated || 0
+    });
+  } catch (err) { next(err); }
+});
+
+app.post("/api/events/:id/trigger-face-index", async (req: any, res: any) => {
+  triggerFaceIndexer();
+  res.json({ success: true, message: "Face indexing triggered in background." });
+});
+
 app.use((err: any, req: any, res: any, next: any) => {
   logger.error(err);
   res.status(500).json({ error: 'Internal Server Error' });
@@ -716,6 +856,10 @@ async function startServer() {
   await db.initDb();
   await setupAdmin();
   await setupWeddingEvent();
+
+  // Initial face recognition index run + periodic execution every 2 minutes
+  setTimeout(triggerFaceIndexer, 5000);
+  setInterval(triggerFaceIndexer, 120000);
 
   if (process.env.NODE_ENV !== "production") {
     logger.info("Setting up Vite Development Server Middleware...");

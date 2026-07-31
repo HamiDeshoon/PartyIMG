@@ -27,6 +27,8 @@ function MediaSkeletonCard() {
   );
 }
 
+const POLAROID_ROTATIONS = [-1.5, 1.2, -0.8, 1.8, 0.4, -1.2, 0.8, -0.4, 1.5, -1.0, 0.3, -1.8];
+
 export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   const [eventInfo, setEventInfo] = useState<any | null>(null);
   const [mediaItems, setMediaItems] = useState<any[]>([]);
@@ -51,8 +53,6 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
 
-  const [demoMode, setDemoMode] = useState(false);
-  const [demoImg, setDemoImg] = useState("wedding");
   const [showOriginal, setShowOriginal] = useState(false);
   const [downloadingMyPhotos, setDownloadingMyPhotos] = useState(false);
 
@@ -546,32 +546,35 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     swipeStartX.current = null;
   };
 
+  // ─── LOADING STATE ───────────────────────────────────────────────
   if (loading) {
     return (
-      <div dir="rtl" className="min-h-[100dvh] bg-slate-900 text-white flex items-center justify-center p-6 text-center font-sans">
-        <div className="space-y-3">
-          <Loader className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
-          <p className="text-sm">در حال اتصال به دوربین...</p>
+      <div dir="rtl" className="min-h-[100dvh] bg-[#2a1c22] text-white flex items-center justify-center p-6 text-center font-sans">
+        <div className="space-y-4 flex flex-col items-center">
+          <div className="w-16 h-16 polaroid animate-pulse-glow flex items-center justify-center">
+            <Camera className="w-8 h-8 text-rose-400 stroke-1" />
+          </div>
+          <Loader className="w-5 h-5 text-rose-400 animate-spin" />
+          <p className="text-sm text-slate-400">در حال اتصال به دوربین...</p>
         </div>
       </div>
     );
   }
 
+  // ─── NOT FOUND ────────────────────────────────────────────────────
   if (!eventInfo) {
     return (
-      <div dir="rtl" className="min-h-[100dvh] bg-slate-950 text-white flex items-center justify-center p-6 text-center font-sans">
-        <div className="max-w-md space-y-4">
-          <AlertCircle className="w-16 h-16 text-rose-500 mx-auto stroke-1" />
+      <div dir="rtl" className="min-h-[100dvh] bg-[#2a1c22] text-white flex items-center justify-center p-6 text-center font-sans">
+        <div className="max-w-sm space-y-5 flex flex-col items-center">
+          <AlertCircle className="w-14 h-14 text-rose-500 stroke-1" />
           <div>
-            <h2 className="text-xl font-display font-bold">ورود مجاز نیست</h2>
-            <p className="text-sm text-slate-400 mt-2 leading-relaxed">
-              رویداد با کد <code className="bg-slate-900 px-1.5 py-0.5 rounded font-mono text-xs text-rose-400">#{eventId}</code> غیرفعال یا حذف شده است.
+            <h2 className="text-xl font-bold text-white mb-1">رویداد یافت نشد</h2>
+            <p className="text-sm text-slate-400 leading-relaxed">
+              رویداد <code className="bg-black/40 px-1.5 py-0.5 rounded font-mono text-xs text-rose-400">#{eventId}</code> غیرفعال یا حذف شده است.
             </p>
           </div>
-          <button type="button"
-            onClick={onBackToHome}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold py-2 px-6 rounded-xl transition-all cursor-pointer inline-flex items-center gap-1"
-          >
+          <button type="button" onClick={onBackToHome}
+            className="btn-gradient py-2.5 px-8 rounded-xl text-sm cursor-pointer">
             بازگشت
           </button>
         </div>
@@ -579,476 +582,269 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     );
   }
 
+  // ─── MAIN RENDER ─────────────────────────────────────────────────
   return (
     <div dir="rtl" className={`min-h-[100dvh] bg-transparent text-white font-sans flex flex-col relative ${!isOnline ? 'pt-7' : ''}`} id="guest_viewport">
 
+      {/* Offline banner */}
       {!isOnline && (
-        <div className="absolute top-0 inset-x-0 bg-red-500 text-white text-[10px] sm:text-xs font-bold py-1.5 px-4 z-[100] flex justify-center items-center shadow-md animate-pulse space-x-2 rtl:space-x-reverse" id="network_indicator">
+        <div className="fixed top-0 inset-x-0 bg-red-500 text-white text-[10px] font-bold py-1.5 px-4 z-[100] flex justify-center items-center gap-2 shadow-md" id="network_indicator">
           <WifiOff className="w-3.5 h-3.5" />
-          <span>ارتباط اینترنت قطع شده است. در صورت آپلود فایل ممکن است با مشکل مواجه شوید.</span>
+          <span>ارتباط اینترنت قطع شده است</span>
         </div>
       )}
 
-      <header className="backdrop-blur-md bg-white/5 border-b border-white/10 px-4 py-3 shrink-0 flex items-center justify-between shadow-md relative overflow-hidden" id="guest_header">
-        {eventInfo.coverImage && (
-          <div className="absolute inset-0 z-0">
-            <img src={eventInfo.coverImage} className="w-full h-48 object-cover opacity-30" />
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#0f0f1a]" />
-          </div>
-        )}
-        <div className="flex items-center space-x-2.5 font-sans rtl:space-x-reverse relative z-10">
-          <button type="button"
-            id="guest_back_btn"
-            onClick={onBackToHome}
-            className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-all cursor-pointer border border-white/10"
-          >
+      {/* ─── HEADER ─────────────────────────────────── */}
+      <header className="sticky top-0 z-40 glass-card border-b border-white/10 px-4 py-3 flex items-center justify-between" id="guest_header">
+        <div className="flex items-center gap-2.5">
+          <button type="button" id="guest_back_btn" onClick={onBackToHome}
+            aria-label="بازگشت"
+            className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-all cursor-pointer border border-white/10">
             <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
           </button>
-          <div className="min-w-0 pr-1">
-            <h1 className="text-sm font-semibold truncate text-white">{eventInfo.name}</h1>
-            <p className="text-[10px] text-slate-400 font-sans truncate">میزبان: {eventInfo.hostName}</p>
+          <div className="min-w-0">
+            <h1 className="text-sm font-semibold truncate text-white leading-tight">{eventInfo.name}</h1>
+            <p className="text-[10px] text-slate-400 truncate">میزبان: {eventInfo.hostName}</p>
           </div>
         </div>
+        {isRegistered && (
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-rose-300 bg-rose-500/15 border border-rose-500/25 px-2.5 py-1 rounded-full font-sans">
+              {guestName}
+            </span>
+          </div>
+        )}
       </header>
 
+      {/* ─── REGISTRATION ───────────────────────────── */}
       {!isRegistered ? (
-        <div className="flex-1 flex items-center justify-center p-6" id="guest_register_card">
+        <div className="flex-1 flex items-center justify-center p-5" id="guest_register_card">
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-            className="w-full max-w-sm backdrop-blur-2xl bg-slate-900/80 p-6 rounded-3xl border border-white/10 shadow-2xl space-y-6"
+            initial={{ opacity: 0, y: 20, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            className="w-full max-w-sm glass-card rounded-3xl p-6 shadow-2xl space-y-5"
           >
-            <div className="text-center space-y-2">
-              {eventInfo.couplePhoto ? (
-                <img src={eventInfo.couplePhoto} className="w-24 h-24 rounded-full object-cover mx-auto border-2 border-rose-500/30" />
-              ) : (
-                <Camera className="w-12 h-12 text-pink-400 mx-auto stroke-1 animate-float" />
-              )}
-              <h2 className="text-lg font-display font-medium text-white">ثبت لحظات رویداد</h2>
-              <p className="text-xs text-slate-300 leading-relaxed font-sans">
-                {eventInfo.description || "با ثبت نام، عکس‌ها و ویدیوهای خود را مستقیما در آلبوم رویداد ذخیره کنید."}
+            {/* Polaroid welcome photo */}
+            <div className="flex justify-center">
+              <div className="relative" style={{ transform: 'rotate(-2.5deg)' }}>
+                <div className="polaroid-tape" />
+                <div className="polaroid">
+                  <div className="w-48 h-56 sm:w-56 sm:h-64 bg-slate-900 overflow-hidden flex items-center justify-center rounded-xs">
+                    <img 
+                      src="/guest-welcome.jpg" 
+                      alt="خوش‌آمدگویی مهمانان" 
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.src = eventInfo.couplePhoto || "/couple.jpg";
+                      }}
+                    />
+                  </div>
+                  <div className="polaroid-caption">
+                    <span className="font-cursive text-slate-800 text-2xl font-bold pt-1">
+                      {eventInfo.name || "لحظات زیبا"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Title & Emojis */}
+            <div className="text-center space-y-2 pt-1">
+              <h2 className="text-base font-bold text-white leading-snug flex items-center justify-center gap-1">
+                <span>✨📸</span>
+                <span>اسم خودتونو برامون بنویسید تا بدونیم کدومتون عکسای قشنگ‌تری می‌گیرین!</span>
+                <span>😉</span>
+              </h2>
+              <p className="text-[11px] text-rose-200/80 bg-rose-500/10 border border-rose-500/20 py-2 px-3 rounded-xl font-medium leading-relaxed">
+                💡 البته که نوشتن اسمتون اختیاریه (می‌تونید ناشناس هم عکس بفرستین) ✨
               </p>
             </div>
 
-            <form onSubmit={handleRegisterName} className="space-y-4">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-400 tracking-wider mb-1.5 font-sans text-right">
-                  نام خود را وارد کنید (اختیاری):
-                </label>
-                <div className="relative font-sans">
-                  <User className="absolute right-3 top-2.5 text-slate-400 w-4 h-4" />
-                  <input
-                    type="text"
-                    maxLength={32}
-                    className="w-full bg-black/45 border border-white/10 rounded-xl py-2 pr-9 pl-4 text-sm text-white placeholder-slate-500 focus:outline-hidden focus:ring-1 focus:ring-pink-500 font-sans text-right"
-                    placeholder="مثال: بابک (خالی بگذارید برای ناشناس)"
-                    value={guestName}
-                    onChange={(e) => setGuestName(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className="bg-pink-950/20 p-3.5 rounded-xl border border-pink-500/20 space-y-1.5 text-right text-[11px] text-pink-300">
-                <div className="font-bold flex items-center gap-1 text-pink-300">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  قوانین آلبوم میزبان:
-                </div>
-                <ul className="list-disc list-inside space-y-1 text-slate-300 font-sans">
-                  <li>فیلترهای جذاب دوربینی به صورت لحظه‌ای قابل اعمال است.</li>
-                </ul>
+            {/* Name form */}
+            <form onSubmit={handleRegisterName} className="space-y-3" id="guest_name_form">
+              <div className="relative">
+                <User className="absolute right-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-rose-400" />
+                <input
+                  type="text"
+                  id="guest_name_input"
+                  value={guestName}
+                  onChange={e => setGuestName(e.target.value)}
+                  placeholder="نام یا اسم مستعار شما (اختیاری)..."
+                  className="w-full bg-black/50 border border-white/20 rounded-xl py-3 pr-10 pl-4 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-400 transition-all"
+                  aria-label="نام مهمان"
+                  autoComplete="name"
+                />
               </div>
 
               <motion.button
                 type="submit"
+                id="guest_register_submit_btn"
                 whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="w-full bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 active:scale-98 text-white font-bold py-2.5 px-4 rounded-xl text-xs shadow-lg shadow-rose-600/10 transition-all cursor-pointer inline-flex justify-center items-center gap-2"
+                whileTap={{ scale: 0.97 }}
+                className="w-full btn-gradient py-3.5 px-4 rounded-xl text-sm font-extrabold shadow-lg shadow-rose-600/30 cursor-pointer flex items-center justify-center gap-2"
               >
-                ورود به گالری و دوربین
+                <Camera className="w-4 h-4" />
+                ورود به دوربین و ثبت عکس
               </motion.button>
             </form>
           </motion.div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col h-full bg-transparent overflow-y-auto pb-8 z-10" id="guest_main_studio">
 
-          <div className="backdrop-blur-md bg-white/5 p-3 flex items-center justify-between border-b border-white/10 text-xs shrink-0 font-sans">
-            <span className="text-slate-200">تعداد فایل‌های ثبت شده شما:</span>
-            <div className="flex items-center gap-4 text-slate-300">
-              <span dir="ltr">📸 <strong className="text-pink-300 font-mono">{snappedCount}</strong></span>
-              <span dir="ltr">🎥 <strong className="text-rose-400 font-mono">{videoCount}</strong></span>
-              <button
-                type="button"
-                onClick={handleDownloadMyPhotos}
-                disabled={downloadingMyPhotos}
-                className="text-[10px] px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-lg transition-all cursor-pointer disabled:opacity-40 flex items-center gap-1"
-              >
-                <Download className="w-3 h-3" />
-                {downloadingMyPhotos ? "..." : "دانلود عکس‌های من"}
-              </button>
-            </div>
-          </div>
+      /* ─── MAIN GUEST PANEL ──────────────────────── */
+      <div className="flex-1 flex flex-col justify-between overflow-y-auto pb-10 z-10" id="guest_main_studio">
 
-          <div className="p-4" id="viewfinder_area">
-            <div className="w-full max-w-sm mx-auto bg-slate-900/65 rounded-3xl overflow-hidden border border-white/15 shadow-2xl relative">
+        {/* ── Viewfinder Card ── */}
+        <div className="px-4 pt-4 pb-3" id="viewfinder_section">
+          <div className="relative rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-[#3d2530]" style={{ aspectRatio: '3/4' }}>
 
-              {localFilePreview ? (
-                  <div className="relative aspect-[3/4] bg-black overflow-hidden flex flex-col justify-between">
-                    <div className="flex-1 w-full h-full relative overflow-hidden flex items-center justify-center bg-zinc-950">
-                      {previewFileType === "video" ? (
-                        <video
-                          src={localFilePreview}
-                          className="w-full h-full object-contain"
-                          controls
-                          playsInline
-                        />
-                      ) : (
-                        <img
-                          src={localFilePreview}
-                          alt="Selected file preview"
-                          className="w-full h-full object-cover transition-all"
-                          style={{ filter: selectedFilter.cssStyle }}
-                        />
-                      )}
-
-                      {previewFileType === "photo" && (
-                        <div className="absolute top-4 left-4 bg-slate-950/80 backdrop-blur-sm text-white text-[10px] uppercase tracking-wider font-mono px-2 py-1 rounded border border-white/10">
-                          <span className="text-amber-300">✨ فیلتر: {selectedFilter.name}</span>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="absolute bottom-0 inset-x-0 bg-slate-950/85 backdrop-blur-md p-3 border-t border-white/10 flex items-center justify-between gap-2 z-10 font-sans">
-                      <button type="button"
-                        onClick={handleCancelPendingFile}
-                        className="bg-transparent hover:bg-white/10 border border-white/20 text-slate-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all shrink-0"
-                      >
-                        لغو انتخاب
-                      </button>
-
-                      <button type="button"
-                        onClick={handleUploadPendingFile}
-                        className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white px-5 py-2.5 rounded-xl text-xs font-bold shadow-md shadow-rose-600/20 flex items-center gap-1.5 cursor-pointer transition-all"
-                      >
-                        <Check className="w-3.5 h-3.5 text-white" />
-                        ارسال تصویر با فیلتر
-                      </button>
-                    </div>
-                  </div>
-                ) : demoMode ? (
-                  <div className="relative aspect-[3/4] bg-black overflow-hidden flex flex-col justify-between">
-                    <div
-                      className="flex-1 w-full h-full relative overflow-hidden flex items-center justify-center bg-zinc-950"
-                      onMouseDown={() => setShowOriginal(true)}
-                      onMouseUp={() => setShowOriginal(false)}
-                      onTouchStart={() => setShowOriginal(true)}
-                      onTouchEnd={() => setShowOriginal(false)}
-                    >
-                      <img
-                        src={demoImg === "portrait" ? "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=800&auto=format&fit=crop" : demoImg === "wedding" ? "https://images.unsplash.com/photo-1519741497674-611481863552?q=80&w=800&auto=format&fit=crop" : "https://images.unsplash.com/photo-1506744626753-1fa28f673b0c?q=80&w=800&auto=format&fit=crop"}
-                        alt="Sample Preview"
-                        className="w-full h-full object-cover transition-all"
-                        style={{ filter: showOriginal ? 'none' : selectedFilter.cssStyle }}
-                      />
-                      <div className="absolute top-4 left-4 bg-slate-950/80 backdrop-blur-sm text-white text-[10px] uppercase tracking-wider font-mono px-2 py-1 rounded border border-white/10">
-                        {showOriginal ? 'بدون فیلتر (اصلی)' : `✨ فیلتر: ${selectedFilter.name}`}
-                      </div>
-                      <div className="absolute top-4 right-4 bg-pink-600/90 text-white text-[10px] uppercase tracking-wider font-sans px-2 py-1 rounded shadow animate-pulse">
-                        برای مقایسه نگه دارید
-                      </div>
-                    </div>
-
-                    <div className="absolute bottom-0 inset-x-0 bg-slate-950/85 backdrop-blur-md p-3 border-t border-white/10 flex flex-col items-center gap-2 z-10 font-sans">
-                      <div className="flex w-full justify-between items-center px-1">
-                         <span className="text-xs text-slate-400">تغییر نمونه دمو:</span>
-                         <div className="flex gap-2">
-                            <button type="button" onClick={() => setDemoImg("portrait")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "portrait" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>پرتره</button>
-                            <button type="button" onClick={() => setDemoImg("wedding")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "wedding" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>عروسی</button>
-                            <button type="button" onClick={() => setDemoImg("landscape")} className={`px-2 py-1 rounded text-[10px] ${demoImg === "landscape" ? "bg-pink-500 text-white" : "bg-white/10 text-slate-300"} cursor-pointer`}>منظره</button>
-                         </div>
-                      </div>
-                      <button type="button"
-                        onClick={() => setDemoMode(false)}
-                        className="w-full bg-transparent hover:bg-white/10 border border-white/20 text-slate-300 hover:text-white px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer transition-all shrink-0"
-                      >
-                        خروج از دمو و بازگشت به گالری
-                      </button>
-                    </div>
-                  </div>
+            {/* Preview / Placeholder */}
+            {localFilePreview ? (
+              <>
+                {previewFileType === "video" ? (
+                  <video src={localFilePreview} className="w-full h-full object-cover" playsInline muted />
                 ) : (
-                  <div className="aspect-[3/4] bg-black/40 flex flex-col items-center justify-center p-6 text-center relative border border-dashed border-white/10 m-2 rounded-2xl">
-                    <div className="space-y-4">
-                      <div className="w-16 h-16 bg-white/5 rounded-full flex items-center justify-center mx-auto text-pink-400 text-lg border border-white/10 shadow-inner">
-                        📸
-                      </div>
-                      <div>
-                        <h3 className="text-sm font-semibold text-white">بارگذاری فایل از گالری</h3>
-                        <p className="text-[11px] text-slate-300 mt-1 max-w-[220px] mx-auto leading-normal">یک عکس یا ویدیوی جذاب (تا ۳۰ ثانیه) انتخاب کرده و با دیگران به اشتراک بگذارید.</p>
-                      </div>
-
-                      <div className="flex flex-col gap-3">
-                        <label className="inline-block bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 active:scale-95 text-white text-xs font-bold px-5 py-2.5 rounded-xl cursor-pointer shadow-md transition-all">
-                          انتخاب فایل از دستگاه
-                          <input
-                            type="file"
-                            accept="image/*,video/*"
-                            multiple
-                            className="hidden"
-                            onChange={handleFileChange}
-                          />
-                        </label>
-
-                        <button type="button"
-                          onClick={() => setDemoMode(true)}
-                          className="bg-white/10 hover:bg-white/20 active:scale-95 text-white text-[11px] font-semibold px-5 py-2.5 rounded-xl cursor-pointer border border-white/10 transition-all flex items-center justify-center gap-1"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          تست فیلتر روی نمونه دمو
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )
-              }
-
-              {uploadProgress && (
-                <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-8 text-center z-30 text-white select-none">
-                  <Loader className="w-10 h-10 text-pink-400 animate-spin mb-4 stroke-1" />
-                  <p className="text-sm font-medium tracking-wide mb-4">{uploadStatusMsg}</p>
-
-                  {batchProgress.total > 0 && (
-                    <p className="text-[11px] text-slate-400 mb-3 font-mono">
-                      {batchProgress.current} / {batchProgress.total}
-                    </p>
-                  )}
-
-                  <div className="w-full max-w-[200px] h-2 bg-white/10 rounded-full overflow-hidden border border-white/5 relative">
-                     <div
-                       className="absolute inset-y-0 left-0 bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300 ease-out"
-                       style={{ width: `${uploadPercent}%` }}
-                     />
-                  </div>
-                  {uploadPercent > 0 && <span className="text-[10px] text-pink-300 font-mono mt-2 font-bold">{uploadPercent}%</span>}
-                </div>
-              )}
-
-              <div className="bg-black/50 border-t border-white/15 p-4 shrink-0 flex items-center justify-center gap-2.5" id="shooter_controls_bar">
-                <label className="p-3 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 hover:text-amber-200 rounded-full transition-all font-sans text-xs flex items-center gap-1 cursor-pointer border border-amber-500/20">
-                  <Camera className="w-4 h-4 ml-1" />
-                  دوربین بومی
-                  <input
-                    type="file"
-                    accept="image/*,video/*"
-                    capture="environment"
-                    className="hidden"
-                    onChange={handleFileChange}
+                  <img
+                    src={localFilePreview}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                    style={{ filter: selectedFilter.cssStyle !== 'none' ? selectedFilter.cssStyle : undefined }}
                   />
-                </label>
-              </div>
-            </div>
-          </div>
-
-          <div className="px-4 py-2" id="filter_carousel">
-            <h3 className="text-center text-[11px] font-bold font-sans uppercase tracking-wider text-slate-400 mb-2">
-              ✨ فیلترهای رنگی دوربین
-            </h3>
-
-            <div className="flex gap-2 overflow-x-auto pb-2 pl-4 pr-1 justify-start md:justify-center select-none scrollbar-none" id="filters_scroll" dir="ltr">
-              <AnimatePresence mode="wait">
-                {FILM_FILTERS.map((f) => (
-                  <motion.button
-                    key={f.id}
-                    onClick={() => setSelectedFilter(f)}
-                    whileTap={{ scale: 0.92 }}
-                    className={`px-3 py-1.5 rounded-full text-[11px] font-medium transition-all shrink-0 cursor-pointer flex items-center gap-1.5 border ${
-                      selectedFilter.id === f.id
-                        ? "bg-gradient-to-r from-rose-600 to-amber-600 border-rose-500 text-white font-bold shadow-sm shadow-rose-600/20"
-                        : "backdrop-blur-md bg-white/5 border-white/10 text-slate-300 hover:text-white hover:bg-white/10"
-                    }`}
-                  >
-                    <span
-                      className="w-3.5 h-3.5 rounded-full inline-block border border-white/30 shadow-inner shrink-0"
-                      style={{
-                        filter: f.cssStyle,
-                        background: "linear-gradient(135deg, #3b82f6 0%, #ec4899 50%, #f59e0b 100%)"
-                      }}
-                    />
-                    {f.name}
-                    {selectedFilter.id === f.id && (
-                      <motion.span
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        className="w-1.5 h-1.5 rounded-full bg-white inline-block"
-                      />
-                    )}
-                  </motion.button>
-                ))}
-              </AnimatePresence>
-            </div>
-            <p className="text-center text-[10px] text-slate-450 leading-normal mt-1 max-w-xs mx-auto">
-              فیلتر در حال اعمال: {selectedFilter.id === 'none' ? "بدون فیلتر" : `"${selectedFilter.name}"`}
-            </p>
-          </div>
-
-          <hr className="border-white/10 my-4" />
-
-          <div className="px-5 space-y-4" id="shared_disposable_feed">
-            {lockedFeed ? (
-              <div className="backdrop-blur-xl bg-slate-900/40 rounded-3xl border border-white/15 p-6 text-center space-y-4 shadow-2xl select-none" id="developing_rolls">
-                <Lock className="w-12 h-12 text-yellow-500 mx-auto stroke-1 animate-bounce" />
-
-                <div className="space-y-1.5">
-                  <h3 className="text-sm font-semibold text-slate-200 tracking-widest font-sans">در حال ظاهر کردن فیلم</h3>
-                  <p className="text-[11px] text-slate-350 leading-normal font-sans">
-                    {eventInfo.hostName} این آلبوم را به صورت <strong>تاخیری</strong> تنظیم کرده است. عکس‌ها مستقیماً برای میزبان ارسال شده‌اند و فعلاً قفل هستند.
-                  </p>
-                </div>
-
-                <div className="bg-black/55 p-5 rounded-2xl border border-white/10 space-y-2 inline-block">
-                  <div className="text-[11px] font-mono text-pink-300">🚨 آلبوم قفل است</div>
-                  <div className="text-2xl font-bold font-sans tracking-tight text-white mb-1">
-                    {mediaItems.length} فایل ثبت شده!
-                  </div>
-                  <p className="text-[10px] text-slate-400 mt-0.5">میزبان در پایان مراسم آلبوم را باز خواهد کرد. به عکاسی ادامه دهید!</p>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b border-white/10 pb-2.5 shrink-0">
-                  <h3 className="text-xs font-bold uppercase tracking-widest text-slate-350 flex items-center gap-1.5 font-sans">
-                    <Unlock className="w-3.5 h-3.5 text-green-500" />
-                    آلبوم عمومی باز است
-                  </h3>
-                  <span className="text-[10px] font-mono text-slate-400">{mediaItems.length} فایل</span>
-                </div>
-
-                {loading ? (
-                  <div className="grid grid-cols-2 gap-3" id="guest_photos_grid">
-                    {[1, 2, 3, 4, 5, 6].map((i) => (
-                      <MediaSkeletonCard key={i} />
-                    ))}
-                  </div>
-                ) : mediaItems.length === 0 ? (
-                  <div className="text-center py-16 text-slate-400 select-none border border-dashed border-white/10 rounded-2xl bg-white/5 backdrop-blur-md">
-                    <Image className="w-8 h-8 text-pink-400/65 mx-auto stroke-1 mb-2" />
-                    <p className="text-xs font-semibold text-slate-300 font-sans">آلبوم خالی است</p>
-                    <p className="text-[10px] text-slate-450 mt-0.5 font-sans">اولین عکاس مراسم باشید و لحظه‌ها را ثبت کنید!</p>
-                  </div>
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-3" id="guest_photos_grid">
-                      {mediaItems.map((m, idx) => (
-                        <motion.div
-                          key={m.id}
-                          layout
-                          initial={{ opacity: 0, scale: 0.95, y: 10 }}
-                          animate={{ opacity: 1, scale: 1, y: 0 }}
-                          transition={{ duration: 0.3, delay: idx * 0.03 }}
-                          onClick={() => setActiveLightboxIndex(idx)}
-                          className="backdrop-blur-md bg-white/5 rounded-2xl overflow-hidden cursor-pointer border border-white/10 hover:border-pink-500/30 hover:scale-[1.02] transition-all duration-200 group flex flex-col justify-between shadow-lg"
-                        >
-                          <div className="relative aspect-square bg-black/60 overflow-hidden flex items-center justify-center select-none">
-                            {m.type === "video" ? (
-                              <div className="relative w-full h-full">
-                                <video
-                                  src={m.url}
-                                  className="w-full h-full object-cover"
-                                  controls
-                                  playsInline
-                                  referrerPolicy="no-referrer"
-                                />
-                                <span className="absolute top-2 right-2 bg-slate-950/80 text-[9px] py-0.5 px-1.5 rounded-full flex items-center gap-0.5 text-white">
-                                  <Video className="w-2.5 h-2.5 text-red-500" />
-                                  {m.duration ? `${m.duration}s` : ""}
-                                </span>
-                              </div>
-                            ) : (
-                              <img
-                                src={m.thumbnailUrl || m.url}
-                                alt={`Submited by ${m.guestName}`}
-                                className="w-full h-full object-cover"
-                                referrerPolicy="no-referrer"
-                                loading="lazy"
-                                onError={(e) => {
-                                  const target = e.currentTarget;
-                                  if (target.src.includes('/api/thumbnail/')) return;
-                                  if (target.src === m.url) return;
-                                  target.src = `/api/thumbnail/${eventId}/${m.id}`;
-                                }}
-                              />
-                            )}
-
-                            <span className="absolute bottom-2 left-2 bg-slate-950/70 backdrop-blur-xs text-white text-[8px] tracking-wider px-1.5 py-0.5 rounded font-sans" dir="ltr">
-                              {FILM_FILTERS.find(f => f.id === m.filter)?.name || m.filter}
-                            </span>
-                          </div>
-
-                          <div className="p-2.5 flex items-center justify-between gap-1.5 bg-black/45 shrink-0 select-none border-t border-white/5">
-                            <div className="min-w-0">
-                              <div className="text-[11px] font-semibold truncate text-slate-200">توسط: {m.guestName}</div>
-                              <div className="text-[9px] text-slate-500 truncate lowercase font-mono mt-0.5">
-                                {new Date(m.timestamp).toLocaleTimeString("fa-IR", { hour: '2-digit', minute: '2-digit' })}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1">
-                              {m.guestName === guestName && (
-                                <button
-                                  type="button"
-                                  onClick={(e) => handleDeleteMedia(m.id, e)}
-                                  className="bg-white/10 hover:bg-red-600/20 p-1.5 rounded-lg flex items-center gap-1 cursor-pointer border border-white/5 transition-all text-red-500"
-                                  title="حذف فایل شما"
-                                >
-                                  <Trash2 className="w-3 h-3 text-red-500" />
-                                </button>
-                              )}
-                              <button
-                                type="button"
-                                onClick={(e) => handleLikeMedia(m.id, e)}
-                                disabled={likedMedia.has(m.id)}
-                                className={`p-1.5 rounded-lg flex items-center gap-1 cursor-pointer border transition-all ${
-                                  likedMedia.has(m.id)
-                                    ? 'bg-rose-600/20 border-rose-500/30 text-rose-500 cursor-default'
-                                    : 'bg-white/10 hover:bg-rose-600/20 border-white/5 text-slate-300 hover:text-rose-500'
-                                }`}
-                              >
-                                <Heart className={`w-3 h-3 ${likedMedia.has(m.id) ? 'text-rose-500 fill-rose-500' : 'text-current'}`} />
-                                <span className="text-[10px] font-mono">{m.likes || 0}</span>
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
-
-                    {hasMoreMedia && mediaItems.length > 0 && (
-                      <div className="pt-8 pb-4 flex justify-center">
-                        <button type="button"
-                          onClick={loadMoreMedia}
-                          disabled={isLoadingMore}
-                          className="bg-white/5 hover:bg-white/10 border border-white/10 px-6 py-2.5 rounded-full text-xs font-semibold text-slate-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                          {isLoadingMore ? (
-                            <>
-                              <Loader className="w-4 h-4 animate-spin" />
-                              در حال بارگذاری...
-                            </>
-                          ) : (
-                            "بارگذاری تصاویر بیشتر"
-                          )}
-                        </button>
-                      </div>
-                    )}
-                  </>
                 )}
+
+                {/* Overlay controls */}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent pointer-events-none" />
+                <div className="absolute bottom-0 inset-x-0 p-4 flex gap-3">
+                  <motion.button
+                    type="button"
+                    onClick={handleCancelPendingFile}
+                    whileTap={{ scale: 0.95 }}
+                    className="flex-1 py-3 rounded-xl bg-black/60 border border-white/20 text-white text-sm font-semibold backdrop-blur-sm cursor-pointer"
+                  >
+                    لغو
+                  </motion.button>
+                  <motion.button
+                    type="button"
+                    id="viewfinder_upload_btn"
+                    onClick={handleUploadPendingFile}
+                    whileTap={{ scale: 0.95 }}
+                    className="flex-[2] py-3 rounded-xl btn-gradient text-sm font-bold cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    ثبت در آلبوم
+                  </motion.button>
+                </div>
+
+                {/* Upload overlay */}
+                {uploadProgress && (
+                  <div className="absolute inset-0 bg-black/80 backdrop-blur-md flex flex-col items-center justify-center gap-4 z-20 select-none">
+                    <Loader className="w-10 h-10 text-rose-400 animate-spin stroke-1" />
+                    <p className="text-sm font-medium text-white">{uploadStatusMsg}</p>
+                    {batchProgress.total > 0 && (
+                      <p className="text-[11px] text-slate-400 font-mono">{batchProgress.current} / {batchProgress.total}</p>
+                    )}
+                    <div className="w-48 h-2 bg-white/10 rounded-full overflow-hidden">
+                      <div className="progress-bar h-full rounded-full" style={{ width: `${uploadPercent}%` }} />
+                    </div>
+                    {uploadPercent > 0 && <span className="text-xs text-rose-300 font-mono font-bold">{uploadPercent}%</span>}
+                  </div>
+                )}
+              </>
+            ) : (
+              /* Empty state placeholder */
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6">
+                <div className="absolute inset-0 bg-gradient-to-br from-rose-500/8 to-amber-500/5 pointer-events-none" />
+                <div className="text-5xl animate-float-y">📷</div>
+                <div className="text-center">
+                  <p className="text-base font-semibold text-white mb-1">بارگذاری فایل از گالری</p>
+                  <p className="text-xs text-slate-400">عکس یا ویدیو انتخاب کنید</p>
+                </div>
+                <div className="flex flex-col gap-2.5 w-full max-w-[210px]">
+                  <label
+                    className="btn-gradient py-3 px-4 rounded-xl text-sm font-bold cursor-pointer flex items-center justify-center gap-2 text-center shadow-lg"
+                    id="viewfinder_gallery_btn"
+                  >
+                    <Image className="w-4 h-4" />
+                    انتخاب از گالری
+                    <input type="file" accept="image/*,video/*" className="hidden" multiple onChange={handleFileChange} />
+                  </label>
+                  <label
+                    className="bg-white/10 hover:bg-white/15 border border-white/15 text-white py-2.5 px-4 rounded-xl text-sm font-medium cursor-pointer flex items-center justify-center gap-2"
+                    id="viewfinder_camera_btn"
+                  >
+                    <Camera className="w-4 h-4 text-amber-300" />
+                    دوربین مستقیم
+                    <input type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleFileChange} />
+                  </label>
+                </div>
+                {/* Guest counter badge */}
+                <div className="absolute top-3 left-3 flex gap-2">
+                  <span className="bg-black/60 text-white text-[9px] px-2 py-1 rounded-full font-mono border border-white/10">
+                    📷 {snappedCount}
+                  </span>
+                  <span className="bg-black/60 text-white text-[9px] px-2 py-1 rounded-full font-mono border border-white/10">
+                    🎬 {videoCount}
+                  </span>
+                </div>
               </div>
             )}
           </div>
-
         </div>
+
+        {/* ── Filter Strip ── */}
+        <div className="px-4 py-3" id="filter_carousel">
+          <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+            <span>🎞</span> فیلترهای دوربین
+          </h3>
+          <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-none" dir="ltr">
+            {FILM_FILTERS.map((f, fIdx) => (
+              <motion.button
+                key={f.id}
+                onClick={() => setSelectedFilter(f)}
+                whileTap={{ scale: 0.88 }}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: fIdx * 0.07, duration: 0.3 }}
+                className="flex flex-col items-center gap-1.5 shrink-0 cursor-pointer outline-none select-none"
+                aria-label={`فیلتر ${f.name}`}
+                aria-pressed={selectedFilter.id === f.id}
+              >
+                <motion.div
+                  animate={{ rotate: selectedFilter.id === f.id ? 0 : (fIdx % 2 === 0 ? -2 : 1.5), scale: selectedFilter.id === f.id ? 1.1 : 1 }}
+                  transition={{ type: "spring", stiffness: 320, damping: 22 }}
+                  className={`filter-swatch ${selectedFilter.id === f.id ? 'active' : ''}`}
+                >
+                  <img
+                    src="/filter-sample.jpg"
+                    alt={f.name}
+                    style={{ width: 62, height: 62, objectFit: 'cover', filter: f.cssStyle, borderRadius: '2px', display: 'block' }}
+                  />
+                  <div className="filter-swatch-label">{f.name}</div>
+                  {selectedFilter.id === f.id && (
+                    <motion.div
+                      initial={{ scale: 0 }} animate={{ scale: 1 }}
+                      transition={{ type: "spring", stiffness: 400, damping: 18 }}
+                      className="absolute top-0.5 right-0.5 w-4 h-4 bg-rose-500 rounded-full flex items-center justify-center shadow"
+                    >
+                      <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                    </motion.div>
+                  )}
+                </motion.div>
+                <motion.span animate={{ opacity: selectedFilter.id === f.id ? 1 : 0.45 }} className="text-base leading-none">
+                  {f.emoji}
+                </motion.span>
+              </motion.button>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-500 mt-1 font-sans">
+            {selectedFilter.id === 'none' ? 'بدون فیلتر' : `فیلتر "${selectedFilter.name}" انتخاب شده`}
+          </p>
+        </div>
+      </div>
       )}
 
+      {/* ─── LIGHTBOX ────────────────────────────────── */}
       <AnimatePresence>
         {activeLightboxIndex !== null && (
           <motion.div
@@ -1058,92 +854,60 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             onClick={() => setActiveLightboxIndex(null)}
-            className="fixed inset-0 bg-slate-950/95 backdrop-blur-xl z-50 flex flex-col p-4 cursor-zoom-out"
+            className="fixed inset-0 bg-[#0f0a0d]/95 backdrop-blur-2xl z-50 flex flex-col p-4 cursor-zoom-out"
             id="gallery_lightbox"
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
-            <div className="flex items-center justify-between border-b border-white/10 pb-3 cursor-default select-none pt-2 font-sans" dir="rtl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-white/10 pb-3 cursor-default select-none pt-1" dir="rtl" onClick={e => e.stopPropagation()}>
               <div>
                 <h4 className="text-sm font-semibold text-white">{mediaItems[activeLightboxIndex]?.guestName}</h4>
-                <p className="text-[10px] text-slate-400 font-sans mt-0.5" dir="ltr">
-                  {FILM_FILTERS.find(f => f.id === mediaItems[activeLightboxIndex]?.filter)?.name || mediaItems[activeLightboxIndex]?.filter}
+                <p className="text-[10px] text-slate-400 mt-0.5" dir="ltr">
+                  {FILM_FILTERS.find(f => f.id === mediaItems[activeLightboxIndex]?.filter)?.emoji} {FILM_FILTERS.find(f => f.id === mediaItems[activeLightboxIndex]?.filter)?.name || mediaItems[activeLightboxIndex]?.filter}
                 </p>
               </div>
-
-              <button type="button"
-                onClick={() => setActiveLightboxIndex(null)}
-                className="bg-white/10 hover:bg-white/20 border border-white/10 text-white font-bold text-xs px-3 py-1.5 rounded-xl cursor-pointer transition-all"
-              >
-                بستن
+              <button type="button" onClick={() => setActiveLightboxIndex(null)}
+                className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs px-3 py-1.5 rounded-xl cursor-pointer transition-all">
+                بستن ✕
               </button>
             </div>
 
-            <div className="flex-1 flex items-center justify-center max-h-[80vh] p-4 relative" onClick={(e) => e.stopPropagation()}>
-              <motion.div
-                key={activeLightboxIndex}
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.25, ease: "easeOut" }}
-                className="w-full h-full flex items-center justify-center"
-              >
+            <div className="flex-1 flex items-center justify-center max-h-[80vh] relative" onClick={e => e.stopPropagation()}>
+              <motion.div key={activeLightboxIndex}
+                initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.22, ease: "easeOut" }}
+                className="w-full h-full flex items-center justify-center p-4">
                 {mediaItems[activeLightboxIndex]?.type === "video" ? (
-                  <video
-                    src={mediaItems[activeLightboxIndex]?.url}
-                    className="max-w-full max-h-full rounded-xl object-contain shadow-2xl"
-                    controls
-                    autoPlay
-                    playsInline
-                    referrerPolicy="no-referrer"
-                  />
+                  <video src={mediaItems[activeLightboxIndex]?.url}
+                    className="max-w-full max-h-full rounded-2xl object-contain shadow-2xl" controls autoPlay playsInline referrerPolicy="no-referrer" />
                 ) : (
-                  <img
-                    src={mediaItems[activeLightboxIndex]?.url}
-                    alt="Active visual"
-                    className="max-w-full max-h-full rounded-xl object-contain shadow-2xl"
-                    referrerPolicy="no-referrer"
-                    draggable={false}
-                  />
+                  <img src={mediaItems[activeLightboxIndex]?.url} alt="عکس"
+                    className="max-w-full max-h-full rounded-2xl object-contain shadow-2xl" referrerPolicy="no-referrer" draggable={false} />
                 )}
               </motion.div>
 
               {mediaItems.length > 1 && (
                 <>
-                  <button type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigateLightbox(-1);
-                    }}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 border border-white/10 p-2 rounded-full text-white transition-all cursor-pointer z-10"
-                  >
+                  <button type="button" onClick={e => { e.stopPropagation(); navigateLightbox(-1); }}
+                    className="absolute left-1 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 border border-white/10 p-2 rounded-full text-white cursor-pointer z-10 transition-all">
                     <ChevronRight className="w-5 h-5" />
                   </button>
-                  <button type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      navigateLightbox(1);
-                    }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 border border-white/10 p-2 rounded-full text-white transition-all cursor-pointer z-10"
-                  >
+                  <button type="button" onClick={e => { e.stopPropagation(); navigateLightbox(1); }}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 border border-white/10 p-2 rounded-full text-white cursor-pointer z-10 transition-all">
                     <ChevronLeft className="w-5 h-5" />
                   </button>
                 </>
               )}
             </div>
 
-            <div className="flex items-center justify-between py-4 cursor-default select-none" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between py-3 cursor-default select-none" onClick={e => e.stopPropagation()}>
               <button type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const m = mediaItems[activeLightboxIndex!];
-                  handleDownload(m?.url, `${eventId}-${m?.id}.${getExt(m)}`);
-                }}
-                className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/10 text-white text-[11px] px-4 py-2 rounded-xl cursor-pointer transition-all"
-              >
+                onClick={e => { e.stopPropagation(); const m = mediaItems[activeLightboxIndex!]; handleDownload(m?.url, `${eventId}-${m?.id}.${getExt(m)}`); }}
+                className="flex items-center gap-1.5 bg-white/10 hover:bg-white/20 border border-white/10 text-white text-[11px] px-4 py-2 rounded-xl cursor-pointer transition-all">
                 <Download className="w-3.5 h-3.5" />
                 دانلود
               </button>
-              <span className="bg-white/10 border border-white/10 text-slate-200 text-[11px] font-sans py-1 px-4 rounded-full">
+              <span className="bg-white/10 border border-white/10 text-slate-200 text-[11px] py-1 px-4 rounded-full font-sans">
                 {activeLightboxIndex! + 1} از {mediaItems.length}
               </span>
             </div>
@@ -1154,3 +918,4 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     </div>
   );
 }
+

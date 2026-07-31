@@ -12,7 +12,7 @@ export interface EventConfig {
   imageLimit: number;       // Upload limit per guest (0 = unlimited)
   videoLimit: number;       // Video limit per guest (0 = unlimited)
   maxVideoDuration: number; // Max video duration in seconds (usually 30)
-  saveDirectory: string;    // On-server save directory. Defaults to "./uploads"
+  saveDirectory: string;    // On-server save directory. Defaults to "D:\Wedding"
   localSyncHost: string;    // Configured local receiver IP/port (e.g., "http://localhost:8080")
   localSyncEnabled: boolean;// Enable automated forwarding to user's real local machine
   coverImage?: string;
@@ -46,12 +46,14 @@ export interface FilterPreset {
   canvasFilter?: string;    // Canvas context filter string (e.g. "contrast(1.2) sepia(0.3)")
   description: string;
   colorClass: string;       // Tailwind class representing the theme
+  emoji: string;            // Emoji icon for visual identification
 }
 
 export const FILM_FILTERS: FilterPreset[] = [
   {
     id: "none",
     name: "Original",
+    emoji: "✦",
     cssStyle: "none",
     canvasFilter: "none",
     description: "بدون فیلتر - کیفیت اصلی و طبیعی",
@@ -60,6 +62,7 @@ export const FILM_FILTERS: FilterPreset[] = [
   {
     id: "west",
     name: "West Classic",
+    emoji: "🌅",
     cssStyle: "contrast(1.05) brightness(1.08) saturate(0.92) sepia(0.08) hue-rotate(-3deg)",
     canvasFilter: "contrast(1.05) brightness(1.08) saturate(0.92) sepia(0.08) hue-rotate(-3deg)",
     description: "Clean, warm tones with subtle vintage warmth. Inspired by the iconic West iOS filter.",
@@ -68,6 +71,7 @@ export const FILM_FILTERS: FilterPreset[] = [
   {
     id: "vhs",
     name: "VHS Retro",
+    emoji: "📼",
     cssStyle: "contrast(1.2) saturate(1.2) sepia(0.2) hue-rotate(-15deg) brightness(0.95)",
     canvasFilter: "contrast(1.2) saturate(1.2) sepia(0.2) hue-rotate(-15deg) brightness(0.95)",
     description: "حس و حال نوارهای قدیمی دهه ۹۰ با کنترلاست بالا.",
@@ -76,6 +80,7 @@ export const FILM_FILTERS: FilterPreset[] = [
   {
     id: "portrait",
     name: "Portrait Soft",
+    emoji: "🌸",
     cssStyle: "contrast(1.02) brightness(1.1) saturate(1.05) sepia(0.02)",
     canvasFilter: "contrast(1.02) brightness(1.1) saturate(1.05) sepia(0.02)",
     description: "نرمی تُن پوست و روشنایی ملایم، عالی برای عکس‌های پرتره.",
