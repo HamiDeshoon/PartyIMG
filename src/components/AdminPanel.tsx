@@ -3,13 +3,13 @@ import {
   Plus, QrCode, Clipboard, Check, Trash2, Folder, 
   Settings, Sparkles, Download, Heart, Eye, Play, 
   RefreshCw, FileText, Terminal, ArrowLeft, Image, Video, Users, User, Printer, Activity, Share2, X,
-  LogOut,
-  ChevronLeft, ChevronRight, CheckSquare, Square
+  LogOut, Edit, Calendar,
+  ChevronLeft, ChevronRight, ChevronDown, Upload, CheckSquare, Square
 } from "lucide-react";
-import { EventConfig, FILM_FILTERS } from "../types";
 import QRCode from "qrcode";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { toast } from "sonner";
+import WeddingCardDesigner from "./WeddingCardDesigner";
 
 interface AdminPanelProps {
   onBackToHome: () => void;
@@ -61,7 +61,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [isSyncingFaces, setIsSyncingFaces] = useState(false);
   const [faceTolerance, setFaceTolerance] = useState<number>(() => {
     const saved = localStorage.getItem("faceTolerance");
-    return saved ? parseFloat(saved) : 0.5;
+    return saved ? parseFloat(saved) : 0.2;
   });
   const [editingPersonId, setEditingPersonId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -119,6 +119,29 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         }
       }
     });
+  };
+
+  const handleMediaUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !selectedEventId) return;
+    const formData = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      formData.append("files", files[i]);
+    }
+    try {
+      const res = await fetch(`/api/events/${selectedEventId}/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (res.ok) {
+        toast.success("رسانه‌ها با موفقیت آپلود شدند");
+        fetchMedia(selectedEventId);
+      } else {
+        toast.error("خطا در آپلود رسانه");
+      }
+    } catch (err: any) {
+      toast.error("خطا در آپلود: " + err.message);
+    }
   };
 
   // Face sync handler
@@ -271,59 +294,11 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [activeTab, setActiveTab] = useState<string>("media");
 
-  // Postal Card Customizable state - Personalized for Fatemeh & Hamid
-  const [showCardStudio, setShowCardStudio] = useState(false);
-  const [cardGreeting, setCardGreeting] = useState("به آلبوم دیجیتال عروسی ما خوش آمدید!");
-  const [cardTitle, setCardTitle] = useState("مراسم عروسی فاطمه و حمید");
-  const [cardSubtitle, setCardSubtitle] = useState("اسکن کنید و لحظات زیبای خود را با ما به اشتراک بگذارید");
-  const [cardInstructions, setCardInstructions] = useState("کد را با دوربین گوشی خود اسکن کنید، عکس بگیرید، فیلتر دلخواه انتخاب کنید و لحظات خاطره‌انگیز را ثبت نمایید.");
-  const [cardFooter, setCardFooter] = useState("با عشق، فاطمه و حمید • Fatemeh & Hamid");
-  const [cardTheme, setCardTheme] = useState<"slate" | "cream" | "neon" | "sage">("cream");
+  // Wedding Card Designer state
+  const [showCardDesigner, setShowCardDesigner] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
-
-  // Enhanced Print Card options
-  const [cardPaperSize, setCardPaperSize] = useState('4x6');
-  const [cardOrientation, setCardOrientation] = useState<'portrait' | 'landscape'>('portrait');
-  const [cardShowBleed, setCardShowBleed] = useState(true);
-
-  const PAPER_SIZES: Record<string, { width: number; height: number; label: string }> = {
-    '4x6': { width: 4, height: 6, label: '4×6"' },
-    '5x7': { width: 5, height: 7, label: '5×7"' },
-    'a5': { width: 5.8, height: 8.3, label: 'A5' },
-    'a6': { width: 4.1, height: 5.8, label: 'A6' },
-    'table-tent': { width: 5, height: 4, label: 'Table Tent' },
-  };
-
-  // Inject print styles for card preview
-  useEffect(() => {
-    const style = window.document.createElement('style');
-    style.id = 'card-print-styles';
-    style.textContent = `
-      @media print {
-        body * { visibility: hidden; }
-        #card-preview, #card-preview * { visibility: visible; }
-        #card-preview { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
-        @page { margin: 0; }
-      }
-    `;
-    window.document.head.appendChild(style);
-    return () => { const s = window.document.getElementById('card-print-styles'); if (s) s.remove(); };
-  }, []);
-
-  const [activeLightboxIndex, setActiveLightboxIndex] = useState<number | null>(null);
-  const swipeStartX = useRef<number | null>(null);
-
-  const handleCardImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        setCardCustomImage(ev.target?.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   // Analytics Computation
   const analyticsData = useMemo(() => {
@@ -451,14 +426,6 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         setLocalSyncHost(ev.localSyncHost || "http://localhost:8080");
         setActiveSyncDir(ev.saveDirectory || "D:\\Wedding");
         fetchMedia(selectedEventId);
-
-        // Initialize postal card printable templates with Persian wedding defaults
-        setCardTitle(ev.name || "مراسم عروسی فاطمه و حمید");
-        setCardGreeting(ev.hostName ? `خوش آمدید از طرف ${ev.hostName}` : "به آلبوم دیجیتال عروسی ما خوش آمدید!");
-        setCardSubtitle("اسکن کنید و لحظات زیبای خود را ثبت کنید");
-        setCardInstructions(ev.description || "کد را با دوربین گوشی اسکن کنید، عکس یا ویدیو بگیرید و در 앨범 دیجیتال ما ثبت کنید.");
-        const formattedDate = ev.date ? ` • ${ev.date}` : "";
-        setCardFooter(`با عشق، ${ev.hostName || "فاطمه و حمید"}${formattedDate} • PartyIMG`);
       }
     } else {
       setSelectedEvent(null);
@@ -718,6 +685,9 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     });
   };
 
+  const [activeLightboxIndex, setActiveLightboxIndex] = useState<number | null>(null);
+  const swipeStartX = useRef<number | null>(null);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (activeLightboxIndex === null) return;
@@ -773,1709 +743,1197 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     document.body.removeChild(a);
   };
 
-  const drawWrappedText = (
-    ctx: CanvasRenderingContext2D, 
-    text: string, 
-    x: number, 
-    y: number, 
-    maxWidth: number, 
-    lineHeight: number
-  ) => {
-    const words = text.split(" ");
-    let line = "";
-    let currentY = y;
-    
-    for (let n = 0; n < words.length; n++) {
-      const testLine = line + words[n] + " ";
-      const metrics = ctx.measureText(testLine);
-      const testWidth = metrics.width;
-      if (testWidth > maxWidth && n > 0) {
-        ctx.fillText(line, x, currentY);
-        line = words[n] + " ";
-        currentY += lineHeight;
-      } else {
-        line = testLine;
-      }
-    }
-    ctx.fillText(line, x, currentY);
-    return currentY + lineHeight;
+  // Print/Download handlers for WeddingCardDesigner
+  const handlePrintCard = () => {
+    // The WeddingCardDesigner component handles printing internally
+    // This is a placeholder for any additional logic needed
   };
 
-  const downloadPostalCard = () => {
-    if (!selectedEvent) return;
-    if (!qrCodeDataUrl) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = 1000;
-    canvas.height = 1500;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    // Redesigned Premium Template Layout
-    // 1. Base Background
-    if (cardTheme === "slate") {
-      const grad = ctx.createLinearGradient(0, 0, 0, 1500);
-      grad.addColorStop(0, "#090d16"); grad.addColorStop(0.5, "#161129"); grad.addColorStop(1, "#0a0710");
-      ctx.fillStyle = grad; ctx.fillRect(0, 0, 1000, 1500);
-    } else if (cardTheme === "cream") {
-      ctx.fillStyle = "#FCFAF8"; ctx.fillRect(0, 0, 1000, 1500);
-      ctx.fillStyle = "#FDFBF7"; ctx.fillRect(20, 20, 960, 1460);
-    } else if (cardTheme === "neon") {
-      ctx.fillStyle = "#050308"; ctx.fillRect(0, 0, 1000, 1500);
-    } else if (cardTheme === "sage") {
-      ctx.fillStyle = "#F2F5F3"; ctx.fillRect(0, 0, 1000, 1500);
-    }
-
-    // 2. Ornate Border Frame
-    const frameColor = cardTheme === "cream" ? "#D4AF37" : cardTheme === "sage" ? "#4A5D23" : cardTheme === "slate" ? "#E1BEE7" : "#C084FC";
-    const innerFrame = cardTheme === "cream" ? "rgba(212, 175, 55, 0.3)" : cardTheme === "sage" ? "rgba(74, 93, 35, 0.3)" : "rgba(255,255,255,0.15)";
-    
-    // Outer Thick Line
-    ctx.strokeStyle = frameColor;
-    ctx.lineWidth = 4;
-    ctx.strokeRect(40, 40, 920, 1420);
-    
-    // Inner Thin Line
-    ctx.strokeStyle = innerFrame;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(52, 52, 896, 1396);
-
-    // Decorative Corner Elements
-    const drawCorner = (x: number, y: number, flipX: boolean, flipY: boolean) => {
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
-      ctx.beginPath();
-      ctx.moveTo(0, 40);
-      ctx.quadraticCurveTo(0, 0, 40, 0);
-      ctx.strokeStyle = frameColor;
-      ctx.lineWidth = 3;
-      ctx.stroke();
-      // Inner dot
-      ctx.beginPath();
-      ctx.arc(12, 12, 3, 0, Math.PI * 2);
-      ctx.fillStyle = frameColor;
-      ctx.fill();
-      ctx.restore();
-    };
-    drawCorner(30, 30, false, false);
-    drawCorner(970, 30, true, false);
-    drawCorner(30, 1470, false, true);
-    drawCorner(970, 1470, true, true);
-
-    const textColor = (cardTheme === "cream" || cardTheme === "sage") ? "#2C3E50" : "#FFFFFF";
-    const accentColor = frameColor;
-
-    // 3. Typography & Text Layout
-    // Greeting
-    ctx.textAlign = "center";
-    ctx.fillStyle = accentColor;
-    ctx.font = "600 24px 'Vazirmatn', sans-serif";
-    ctx.letterSpacing = "2px";
-    ctx.fillText(cardGreeting, 500, 150);
-
-    // Divider ornament top
-    ctx.font = "20px serif";
-    ctx.fillText("✧ ✦ ✧", 500, 200);
-
-    // Main Title
-    ctx.fillStyle = textColor;
-    ctx.font = "800 64px 'Vazirmatn', sans-serif";
-    ctx.letterSpacing = "0px";
-    // Title shadow for premium feel
-    if (cardTheme === "cream") {
-      ctx.shadowColor = "rgba(0,0,0,0.1)";
-      ctx.shadowBlur = 10;
-      ctx.shadowOffsetY = 4;
-    }
-    ctx.fillText(cardTitle, 500, 280);
-    ctx.shadowColor = "transparent"; // Reset shadow
-
-    // Subtitle
-    ctx.fillStyle = (cardTheme === "cream" || cardTheme === "sage") ? "#596A7A" : "#A0AEC0";
-    ctx.font = "400 28px 'Vazirmatn', sans-serif";
-    ctx.fillText(cardSubtitle, 500, 340);
-
-    // 4. Elegant QR Code Layout
-    const qrSize = 440;
-    const qrx = 500 - qrSize / 2;
-    const qry = 420;
-
-    // QR Golden/Accent Frame
-    ctx.fillStyle = accentColor;
-    ctx.fillRect(qrx - 4, qry - 4, qrSize + 8, qrSize + 8);
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(qrx, qry, qrSize, qrSize);
-
-    // Load and draw QR
-    const qrImg = new window.Image();
-    qrImg.onload = () => {
-      ctx.drawImage(qrImg, qrx + 15, qry + 15, qrSize - 30, qrSize - 30);
-
-      // 5. Bottom Instructions Area
-      const boxY = qry + qrSize + 80;
-      
-      // Elegant box for instructions
-      ctx.fillStyle = (cardTheme === "cream" || cardTheme === "sage") ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)";
-      ctx.fillRoundRect = function(x: number, y: number, w: number, h: number, r: number) {
-        this.beginPath(); this.moveTo(x+r, y); this.lineTo(x+w-r, y); this.arcTo(x+w, y, x+w, y+h, r); this.lineTo(x+w, y+h-r); this.arcTo(x+w, y+h, x+w-r, y+h, r); this.lineTo(x+r, y+h); this.arcTo(x, y+h, x, y+h-r, r); this.lineTo(x, y+r); this.arcTo(x, y, x+r, y, r); this.closePath(); this.fill();
-      };
-      (ctx as any).fillRoundRect(150, boxY, 700, 160, 20);
-
-      // Camera Icon / Decorator
-      ctx.fillStyle = accentColor;
-      ctx.font = "32px 'Vazirmatn', sans-serif";
-      ctx.fillText("📷", 500, boxY + 45);
-
-      // Instructions text
-      ctx.fillStyle = textColor;
-      ctx.font = "400 24px 'Vazirmatn', sans-serif";
-      ctx.lineHeight = 36;
-      drawWrappedText(ctx, cardInstructions, 500, boxY + 95, 600, 40);
-
-      // Divider ornament bottom
-      ctx.fillStyle = accentColor;
-      ctx.font = "20px serif";
-      ctx.fillText("✧ ✦ ✧", 500, 1380);
-
-      // Footer
-      ctx.fillStyle = (cardTheme === "cream" || cardTheme === "sage") ? "#7F8C8D" : "#CBD5E1";
-      ctx.font = "600 22px 'Vazirmatn', sans-serif";
-      ctx.letterSpacing = "1px";
-      ctx.fillText(cardFooter, 500, 1430);
-
-      // Download trigger
-      const dataUrl = canvas.toDataURL("image/png", 1.0);
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `${selectedEventId || "event"}-premium-invitation.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    };
-    qrImg.src = qrCodeDataUrl;
-  };
-
-  const printPostalCard = () => {
-    const printWindow = window.open("", "_blank");
-    if (!printWindow) {
-      toast.error("مکانیسم پاپ‌آپ مرورگر مسدود شده است! لطفاً پاپ‌آپ را برای این سایت مجاز کنید تا نسخه پرینت باز شود.");
-      return;
-    }
-
-    const pWidth = PAPER_SIZES[cardPaperSize]?.width || 4.2;
-    const pHeight = PAPER_SIZES[cardPaperSize]?.height || 6.2;
-    const isPortrait = cardOrientation === 'portrait';
-    const wIn = isPortrait ? pWidth : pHeight;
-    const hIn = isPortrait ? pHeight : pWidth;
-
-    printWindow.document.write(`
-      <html dir="rtl">
-        <head>
-          <title>کارت دعوت اختصاصی - ${cardTitle || "فاطمه و حمید"}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700;800&display=swap" rel="stylesheet">
-          <style>
-            body {
-              margin: 0;
-              padding: 0;
-              font-family: 'Vazirmatn', sans-serif;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              height: 100vh;
-              background-color: #ffffff;
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
-            }
-            .postcard {
-              width: ${wIn}in;
-              height: ${hIn}in;
-              border: 5px double ${cardTheme === 'cream' ? '#c2933d' : cardTheme === 'sage' ? '#2d4a34' : cardTheme === 'slate' ? '#f43f5e' : '#c084fc'};
-              box-sizing: border-box;
-              background-color: ${cardTheme === 'cream' ? '#faf6ee' : cardTheme === 'sage' ? '#f4f6f4' : cardTheme === 'slate' ? '#120a1c' : '#0a0710'};
-              color: ${cardTheme === 'cream' ? '#1a202c' : cardTheme === 'sage' ? '#1e3022' : '#ffffff'};
-              padding: 0.3in;
-              display: flex;
-              flex-direction: column;
-              justify-content: space-between;
-              align-items: center;
-              text-align: center;
-              position: relative;
-              border-radius: 12px;
-            }
-            .greeting {
-              font-size: 11px;
-              font-weight: 800;
-              letter-spacing: 0.5px;
-              color: ${cardTheme === 'cream' ? '#8a734e' : cardTheme === 'sage' ? '#3f5e46' : '#f43f5e'};
-              margin: 0;
-            }
-            .title {
-              font-size: 20px;
-              font-weight: 800;
-              margin: 4px 0;
-              line-height: 1.25;
-            }
-            .subtitle {
-              font-size: 10.5px;
-              opacity: 0.85;
-              margin: 0 0 8px 0;
-              font-weight: 600;
-            }
-            .qr-container {
-              background-color: #ffffff;
-              padding: 10px;
-              border-radius: 12px;
-              box-shadow: 0 3px 15px rgba(0,0,0,0.18);
-              display: inline-block;
-              position: relative;
-            }
-            .qr-image {
-              width: 140px;
-              height: 140px;
-              display: block;
-              border-radius: 6px;
-            }
-            .instructions {
-              font-size: 9.5px;
-              line-height: 1.5;
-              max-width: 92%;
-              margin: 8px auto 0 auto;
-              font-weight: 600;
-              color: ${cardTheme === 'cream' ? '#2d3748' : cardTheme === 'sage' ? '#3a4c40' : '#e2e8f0'};
-            }
-            .symbol {
-              font-size: 16px;
-              margin: 2px 0;
-            }
-            .footer {
-              font-size: 8.5px;
-              opacity: 0.7;
-              margin-top: 6px;
-              font-weight: 600;
-              color: ${cardTheme === 'cream' ? '#8a734e' : cardTheme === 'sage' ? '#2d4a34' : '#f43f5e'};
-            }
-            @media print {
-              body { background: none; }
-              .postcard { border-radius: 0; box-shadow: none; page-break-inside: avoid; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="postcard">
-            <div>
-              <p class="greeting">${cardGreeting}</p>
-              <h1 class="title">${cardTitle || "مراسم عروسی فاطمه و حمید"}</h1>
-              <p class="subtitle">${cardSubtitle}</p>
-            </div>
-            
-            <div class="qr-container">
-              <img class="qr-image" src="${qrCodeDataUrl}" alt="Guest QR Code" />
-            </div>
-
-            <div>
-              <div class="symbol">📸</div>
-              <p class="instructions">${cardInstructions}</p>
-              <div class="footer">${cardFooter}</div>
-            </div>
-          </div>
-          <script>
-            window.onload = function() {
-              setTimeout(function() {
-                window.print();
-                window.close();
-              }, 500);
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-  };
-
-
-  const downloadSyncScriptUrl = selectedEventId 
-    ? `/api/events/${selectedEventId}/sync-script` 
-    : "";
-
-  const localSyncCLICommand = selectedEventId
-    ? `node sync-agent-${selectedEventId}.js "./Local_Photos"`
-    : "";
-
-  const copyCLICommand = () => {
-    navigator.clipboard.writeText(localSyncCLICommand);
-    setIsCopiedCommand(true);
-    setTimeout(() => setIsCopiedCommand(false), 2000);
+  const handleDownloadCard = () => {
+    // The WeddingCardDesigner component handles downloading internally
+    // This is a placeholder for any additional logic needed
   };
 
   if (!isAuthenticated) {
     return (
-      <div className="flex-1 min-h-screen bg-[#2a1c22] flex items-center justify-center p-6 relative overflow-hidden" id="admin_login_view">
-        <div className="orb orb-rose" aria-hidden="true" />
-        <div className="orb orb-amber" aria-hidden="true" />
-
-        <form onSubmit={handleLogin} className="glass-card rounded-3xl p-8 max-w-sm w-full space-y-6 shadow-2xl z-10">
-          <div className="text-center">
-            <h2 className="text-2xl font-display font-medium text-white flex items-center justify-center gap-2">
-              <Settings className="w-6 h-6 text-pink-400 animate-spin-slow" />
-              Admin Portal
-            </h2>
-            <p className="text-xs text-slate-400 mt-2">Enter credentials to manage settings.</p>
-          </div>
-          
-          {authError && <div className="bg-red-500/20 border border-red-500/50 text-red-200 text-xs p-3 rounded-xl text-center">{authError}</div>}
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-widest mb-1">Username</label>
-              <input type="text" value={authUsername} onChange={e => setAuthUsername(e.target.value)} required className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-pink-400" />
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 font-sans" dir="rtl">
+        <div className="w-full max-w-md">
+          <div className="backdrop-blur-2xl bg-slate-900/80 rounded-3xl border border-slate-700/50 p-8 md:p-10 shadow-2xl">
+            <div className="text-center mb-8">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-amber-500 to-rose-500 flex items-center justify-center">
+                <Sparkles className="w-8 h-8 text-white" />
+              </div>
+              <h1 className="text-2xl md:text-3xl font-bold text-white font-vazir">پنل مدیریت PartyIMG</h1>
+              <p className="text-slate-400 mt-2 font-vazir">ورود به پنل ادمین برای مدیریت رویدادها</p>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-widest mb-1">Password</label>
-              <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} required className="w-full bg-black/40 border border-white/5 rounded-xl px-4 py-2.5 text-white text-sm focus:outline-none focus:border-pink-400" />
+            
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div>
+                <label htmlFor="username" className="block text-sm font-medium text-slate-300 mb-2 font-vazir">نام کاربری</label>
+                <input
+                  id="username"
+                  type="text"
+                  value={authUsername}
+                  onChange={(e) => setAuthUsername(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent transition-all font-vazir"
+                  placeholder="نام کاربری"
+                  autoComplete="username"
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="password" className="block text-sm font-medium text-slate-300 mb-2 font-vazir">رمز عبور</label>
+                <input
+                  id="password"
+                  type="password"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent transition-all font-vazir"
+                  placeholder="رمز عبور"
+                  autoComplete="current-password"
+                  required
+                />
+              </div>
+              {authError && (
+                <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-xl text-red-400 text-sm font-vazir text-center animate-shake">
+                  {authError}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 px-4 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg"
+              >
+                {loading ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                    در حال ورود...
+                  </>
+                ) : (
+                  <>
+                    <LogOut className="w-5 h-5" />
+                    ورود به پنل مدیریت
+                  </>
+                )}
+              </button>
+            </form>
+            
+            <div className="mt-8 text-center">
+              <p className="text-slate-500 text-sm font-vazir">PartyIMG v2.0 • Wedding Album Platform</p>
             </div>
           </div>
-          
-          <button type="submit" disabled={loading} className="w-full bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-medium py-3 rounded-xl disabled:opacity-50">
-             {loading ? 'Authenticating...' : 'Login'}
-          </button>
-          
-          <div className="pt-2 text-center">
-             <button type="button" onClick={onBackToHome} className="text-xs text-slate-400 hover:text-white transition-colors">Return to Home</button>
-          </div>
-        </form>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#2a1c22] text-white font-sans relative" id="admin_viewport" dir="rtl">
-      
-      {/* Ambient background orbs */}
-      <div className="orb orb-rose" aria-hidden="true" />
-      <div className="orb orb-amber" aria-hidden="true" />
+    <div className="min-h-screen bg-slate-950 font-sans" dir="rtl">
+      {/* Top Navigation */}
+      <header className="backdrop-blur-2xl bg-slate-900/80 border-b border-slate-800/50 sticky top-0 z-40">
+        <div className="max-w-full mx-auto px-4 md:px-6">
+          <div className="flex items-center justify-between h-16 md:h-18">
+            <div className="flex items-center gap-4">
+              <button
+                onClick={onBackToHome}
+                className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-all cursor-pointer border border-slate-700/50"
+                aria-label="بازگشت به صفحه اصلی"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-500 to-rose-500 flex items-center justify-center">
+                  <Sparkles className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold text-white font-vazir">پنل مدیریت</h1>
+                  <p className="text-xs text-slate-400 font-vazir">PartyIMG Wedding Album Platform</p>
+                </div>
+              </div>
+            </div>
 
-      {/* Admin Navbar */}
-      <nav id="admin_nav" className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 glass-card border-b border-white/10 text-white shadow-lg">
-        <div className="flex items-center space-x-3 rtl:space-x-reverse">
-          <button type="button"
-            id="admin_back_btn"
-            onClick={onBackToHome} 
-            className="p-2 bg-white/5 hover:bg-white/15 rounded-lg text-white border border-white/10 transition-colors cursor-pointer"
-            title="بازگشت به صفحه اصلی"
-          >
-            <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
-          </button>
-          <div>
-            <h1 className="text-xl font-display font-medium text-white flex items-center gap-2">
-              <Settings className="w-5 h-5 text-pink-400 animate-spin-slow" />
-              LENS:SHARE <span className="text-xs font-mono text-pink-400 border border-pink-400/35 px-2 py-0.5 rounded-full uppercase" dir="ltr">Admin</span>
-              <span className={`inline-block w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`} title={wsConnected ? 'Connected' : 'Disconnected'} />
-            </h1>
-            <p className="text-xs font-sans text-slate-400 mt-0.5">مدیریت حرفه‌ای مراسم و گالری تصاویر</p>
+            <div className="flex items-center gap-3">
+              {/* Connection Status */}
+              <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800/50 border border-slate-700/50">
+                <div className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`} />
+                <span className="text-xs font-mono text-slate-300">{wsConnected ? 'متصل' : 'قطع شده'}</span>
+              </div>
+
+              {/* Event Selector */}
+              <div className="relative">
+                <select
+                  value={selectedEventId || ""}
+                  onChange={(e) => setSelectedEventId(e.target.value || null)}
+                  className="appearance-none bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-2 pr-10 text-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent cursor-pointer min-w-[200px] font-vazir"
+                >
+                  <option value="">-- انتخاب رویداد --</option>
+                  {events.map(ev => (
+                    <option key={ev.id} value={ev.id}>{ev.name} ({ev.id})</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+              </div>
+
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="hidden sm:flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer shadow-lg"
+              >
+                <Plus className="w-4 h-4" />
+                رویداد جدید
+              </button>
+
+              <button
+                onClick={handleLogout}
+                className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-all cursor-pointer border border-slate-700/50"
+                aria-label="خروج از سیستم"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
           </div>
         </div>
-        
-        <div className="flex items-center gap-2 sm:gap-3">
-          <button type="button"
-            id="admin_logout_btn"
-            onClick={handleLogout}
-            aria-label="خروج از پنل مدیریت"
-            className="flex border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/25 text-rose-200 hover:text-white font-medium py-2 px-3 sm:px-4 rounded-xl text-xs sm:text-sm items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-          >
-            <LogOut className="w-4 h-4 text-rose-400" />
-            <span>خروج</span>
-          </button>
-          <button type="button"
-            id="admin_create_event_trigger"
-            onClick={() => setShowCreateModal(true)}
-            className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-medium py-2 px-4 rounded-xl text-sm flex items-center gap-2 transition-all shadow-lg active:scale-95 cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            ایجاد مراسم جدید
-          </button>
-        </div>
-      </nav>
+      </header>
 
-      {/* Primary Layout Grid */}
-      <div className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-4 gap-6" id="admin_main_grid">
-        
-        {/* Left column: Event selection sidebar */}
-        <div className="lg:col-span-1 space-y-4 font-sans" id="admin_event_picker_sidebar">
-          <div className="glass-card rounded-2xl p-4 shadow-2xl">
-            <h2 className="text-xs font-bold tracking-wider text-slate-300 mb-3 flex items-center justify-between">
-              <span>رویدادهای فعال</span>
-              <span className="bg-pink-500/20 text-pink-300 border border-pink-500/30 text-[10px] py-0.5 px-2.5 rounded-full font-mono">{events.length}</span>
-            </h2>
-
-            {loading ? (
-              <div className="py-8 text-center text-sm text-slate-400">در حال بارگذاری...</div>
-            ) : events.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-400 rounded-xl bg-black/25 border border-dashed border-white/10 p-4 leading-relaxed">
-                مراسمی یافت نشد. برای شروع، یک رویداد جدید بسازید.
+      {/* Main Content */}
+      <main className="max-w-full mx-auto px-4 md:px-6 py-6 pb-16">
+        {loading ? (
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="text-center">
+              <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-slate-400 font-vazir">در حال بارگذاری پنل مدیریت...</p>
+            </div>
+          </div>
+        ) : !selectedEventId ? (
+          <div className="text-center py-20">
+            <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-slate-800/50 flex items-center justify-center border border-slate-700/50">
+              <Folder className="w-10 h-10 text-slate-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-white font-vazir mb-2">هیچ رویدادی انتخاب نشده</h2>
+            <p className="text-slate-400 font-vazir mb-6">از منوی بالا یک رویداد را انتخاب کنید یا رویداد جدیدی بسازید</p>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white font-semibold rounded-xl transition-all cursor-pointer shadow-lg"
+            >
+              <Plus className="w-5 h-5" />
+              <span className="font-vazir">ساختن رویداد جدید</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Event Header */}
+            <div className="mb-6 animate-slide-up">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <h2 className="text-2xl md:text-3xl font-bold text-white font-vazir">{selectedEvent?.name || "بدون نام"}</h2>
+                  <div className="flex flex-wrap items-center gap-3 mt-2 text-slate-400 text-sm font-vazir">
+                    <span className="flex items-center gap-1"><FileText className="w-4 h-4" /> کد: <code className="font-mono text-amber-300">{selectedEventId}</code></span>
+                    {selectedEvent?.hostName && <span className="flex items-center gap-1"><User className="w-4 h-4" /> میزبان: {selectedEvent.hostName}</span>}
+                    {selectedEvent?.date && <span className="flex items-center gap-1"><Calendar className="w-4 h-4" /> {selectedEvent.date}</span>}
+                    <span className="flex items-center gap-1"><Users className="w-4 h-4" /> {analyticsData.totalGuests} مهمان</span>
+                    <span className="flex items-center gap-1"><Activity className="w-4 h-4" /> {mediaItems.length} رسانه</span>
+                    <span className="flex items-center gap-1"><Download className="w-4 h-4" /> {analyticsData.totalStorage}</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => setShowCardDesigner(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer shadow-lg"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span className="font-vazir">استودیو کارت دعوت</span>
+                  </button>
+                  <button
+                    onClick={handleNativeShare}
+                    className="px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-all cursor-pointer border border-slate-700/50 rounded-xl flex items-center gap-2"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span className="font-vazir text-sm">اشتراک‌گذاری</span>
+                  </button>
+                </div>
               </div>
-            ) : (
-              <div className="space-y-1 max-h-[450px] overflow-y-auto pr-1">
-                {events.map(ev => (
-                  <button type="button"
-                    key={ev.id}
-                    id={`event_btn_${ev.id}`}
-                    onClick={() => setSelectedEventId(ev.id)}
-                    className={`w-full text-left p-3 rounded-xl transition-all flex items-center justify-between group ${
-                      selectedEventId === ev.id 
-                        ? 'bg-white/25 border-r-4 border-pink-500 text-white font-medium shadow-lg' 
-                        : 'bg-black/20 hover:bg-white/10 text-slate-300 hover:text-white border-r-4 border-transparent'
+            </div>
+
+            {/* Tab Navigation */}
+            <div className="mb-6 animate-slide-up">
+              <div className="flex gap-1 bg-slate-900/50 rounded-2xl p-1 border border-slate-800/50 overflow-x-auto">
+                {[
+                  { id: "media", label: "رسانه‌ها", icon: Image, count: mediaItems.length },
+                  { id: "analytics", label: "تحلیل‌ها", icon: BarChart },
+                  { id: "card", label: "کارت دعوت", icon: Sparkles },
+                  { id: "faces", label: "شناسایی چهره", icon: User, badge: faceProfiles.length },
+                  { id: "sync", label: "همگام‌سازی", icon: RefreshCw },
+                  { id: "settings", label: "تنظیمات", icon: Settings },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
+                      activeTab === tab.id
+                        ? "bg-white/10 text-white shadow-md"
+                        : "text-slate-400 hover:text-slate-200 hover:bg-white/5"
                     }`}
                   >
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-semibold truncate text-white">{ev.name}</div>
-                      <div className="text-[11px] text-slate-400 font-mono mt-0.5">#{ev.id}</div>
-                    </div>
-                    <span className="bg-white/10 border border-white/15 text-pink-300 text-[10px] font-mono py-0.5 px-2 rounded-full shrink-0 shadow-2xs group-hover:bg-white/20 transition-colors">
-                      {ev.mediaCount || 0}
-                    </span>
+                    <tab.icon className="w-4 h-4" />
+                    <span className="font-vazir">{tab.label}</span>
+                    {(tab.count !== undefined || tab.badge !== undefined) && (
+                      <span className="px-2 py-0.5 text-xs rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                        {tab.count !== undefined ? tab.count : tab.badge}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
-            )}
-          </div>
-
-          {selectedEvent && (
-            <div className="glass-card border border-rose-500/25 rounded-2xl p-4 shadow-xl" id="danger_zone">
-              <h3 className="text-xs font-bold text-rose-400 mb-2">منطقه خطر</h3>
-              <p className="text-[11px] text-slate-350 mb-3 leading-relaxed">حذف این رویداد، تمامی فایل‌های مهمانان را برای همیشه پاک می‌کند.</p>
-              <button type="button"
-                id="delete_event_btn"
-                onClick={() => handleDeleteEvent(selectedEvent.id)}
-                className="w-full bg-rose-950/20 hover:bg-rose-900/40 text-rose-300 border border-rose-500/30 text-xs font-medium py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                حذف رویداد
-              </button>
             </div>
-          )}
-        </div>
 
-        {/* Right column(s): Selected event workspaces */}
-        <div className="lg:col-span-3 space-y-6" id="admin_workspace">
-          {selectedEvent ? (
-            <>
-              {/* Event Header Banner */}
-              <div className="glass-card rounded-2xl p-6 shadow-xl flex flex-col md:flex-row items-center md:items-start justify-between gap-6" id="event_work_hdr" dir="rtl">
-                <div className="space-y-1.5 flex-1 max-w-xl text-right">
-                  <span className="bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[11px] py-1 px-2.5 rounded-full font-medium inline-block">
-                    میزبان: <span dir="ltr">{selectedEvent.hostName}</span>
-                  </span>
-                  <h2 className="text-2xl font-display font-medium text-white mt-1">{selectedEvent.name}</h2>
-                  <p className="text-sm text-slate-305 leading-relaxed font-sans">{selectedEvent.description}</p>
-                  
-                  <div className="flex flex-wrap gap-2 pt-2 justify-start" id="event_badge_bar">
-                    <span className="bg-white/10 border border-white/10 text-slate-300 text-xs py-1 px-3 rounded-lg flex items-center gap-1.5 font-sans">
-                      تاریخ ورود: <span className="font-semibold text-white" dir="ltr">{new Date(selectedEvent.createdAt).toLocaleDateString("fa-IR")}</span>
-                    </span>
-                    <span className="bg-pink-500/10 text-pink-300 border border-pink-500/20 text-xs py-1 px-3 rounded-lg flex items-center gap-1.5">
-                      زمان نمایش آلبوم:
-                      <span className="font-semibold text-[10px] bg-pink-950/40 border border-pink-500/30 px-1.5 py-0.5 rounded-md text-pink-200">
-                        {selectedEvent.revealStyle === "instant" ? "آنی" : "پس از ceremonies"}
-                      </span>
-                    </span>
-                    <span className="bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs py-1 px-3 rounded-lg flex items-center gap-1">
-                      سقف مجاز:
-                      <span className="font-semibold text-white truncate max-w-[120px]" dir="ltr">
-                        {selectedEvent.imageLimit === 0 ? "نامحدود" : `${selectedEvent.imageLimit}📸`} / {selectedEvent.videoLimit === 0 ? "نامحدود" : `${selectedEvent.videoLimit}🎥`}
-                      </span>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Event Key QR Code Panel — Luxury Wedding Redesign */}
-                <div className="backdrop-blur-xl bg-gradient-to-b from-[#3d2530]/90 via-[#2a1c22]/90 to-[#1e1318]/90 rounded-3xl p-5 border border-amber-500/25 flex flex-col items-center shrink-0 w-full md:w-[270px] shadow-2xl relative overflow-hidden" id="qr_card" dir="rtl">
-                  {/* Glowing background orb */}
-                  <div className="absolute -top-12 -right-12 w-32 h-32 bg-amber-500/15 rounded-full blur-2xl pointer-events-none" />
-                  <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-rose-500/15 rounded-full blur-2xl pointer-events-none" />
-
-                  {/* Panel Header */}
-                  <div className="w-full flex items-center justify-between mb-3 border-b border-white/10 pb-2">
-                    <div className="flex items-center gap-1.5">
-                      <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-                      <span className="text-xs font-bold text-amber-200">کارت و کد QR رویداد</span>
-                    </div>
-                    <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                      فعال
-                    </span>
-                  </div>
-
-                  {/* Interactive QR Display Frame */}
-                  <div 
-                    className="qr-glow-frame relative group cursor-pointer my-1 select-none" 
-                    onClick={() => setShowCardStudio(true)} 
-                    title="برای طراحی و پرینت کارت دعوت کلیک کنید"
-                  >
-                    {qrCodeDataUrl ? (
-                      <img
-                        src={qrCodeDataUrl}
-                        alt="Guest QR Code"
-                        className="w-32 h-32 select-none rounded-xl"
-                      />
-                    ) : (
-                      <div className="w-32 h-32 bg-slate-100 flex items-center justify-center text-slate-500 text-xs font-mono">در حال ساخت...</div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/60 to-black/30 opacity-0 group-hover:opacity-100 transition-all duration-300 rounded-xl flex flex-col items-center justify-center text-white p-2 text-center backdrop-blur-[2px]">
-                      <Printer className="w-6 h-6 text-amber-300 mb-1 animate-bounce" />
-                      <span className="text-[11px] font-bold text-amber-200 leading-tight">طراحی و پرینت کارت</span>
-                      <span className="text-[8.5px] text-slate-300 mt-0.5">کلیک کنید</span>
-                    </div>
-                  </div>
-                  
-                  {/* Host info badge */}
-                  <p className="text-[10.5px] font-bold text-rose-300 mt-2 mb-3 text-center truncate max-w-full">
-                    {selectedEvent?.name || "مراسم عروسی فاطمه و حمید"}
-                  </p>
-
-                  {/* Action Buttons Grid */}
-                  <div className="w-full space-y-2 font-sans">
-                    <div className="grid grid-cols-3 gap-2 pt-1">
-                      <button type="button"
-                        id="copy_guest_link_btn"
-                        onClick={copyGuestLink}
-                        className="text-xs bg-gradient-to-r from-rose-500/20 to-amber-500/20 hover:from-rose-500/30 hover:to-amber-500/30 text-amber-200 font-bold py-2 px-3 rounded-xl transition-all flex items-center gap-1.5 justify-center w-full cursor-pointer border border-amber-500/30 shadow-md active:scale-95"
-                      >
-                        {copiedLink ? <Check className="w-4 h-4 text-emerald-400" /> : <Clipboard className="w-4 h-4 text-amber-400" />}
-                        {copiedLink ? "لینک کپی شد!" : "کپی لینک دسترسی مهمانان"}
-                      </button>
-
-                      <button type="button"
-                        onClick={() => setShowCardStudio(true)}
-                        className="text-[10px] bg-amber-500/15 hover:bg-amber-500/30 text-amber-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-amber-500/25 active:scale-95"
-                        title="طراحی و پرینت کارت دعوت"
-                      >
-                        <Printer className="w-3.5 h-3.5 text-amber-400" />
-                        طراحی کارت
-                      </button>
-                      
-                      <button type="button"
-                        onClick={printPostalCard}
-                        className="text-[10px] bg-rose-500/15 hover:bg-rose-500/30 text-rose-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-rose-500/25 active:scale-95"
-                        title="پرینت فوری کارت"
-                      >
-                        <FileText className="w-3.5 h-3.5 text-rose-400" />
-                        پرینت فوری
-                      </button>
-
-                      <button type="button"
-                        onClick={downloadStandaloneQR}
-                        className="text-[10px] bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white font-bold py-2 px-2 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer border border-white/10 active:scale-95"
-                        title="دانلود تصویر خام کد QR"
-                      >
-                        <Download className="w-3.5 h-3.5 text-slate-400" />
-                        ذخیره QR
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Event Analytics Dashboard */}
-              <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-6" id="event_analytics_deck" dir="rtl">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                  <div>
-                    <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
-                      <Activity className="w-5 h-5 text-pink-400" />
-                      آمار لحظه‌ای و فضای ذخیره‌سازی
-                    </h3>
-                    <p className="text-xs text-slate-300 mt-1">
-                      نظارت بر نمودار دریافت فایل‌ها و میزان مشارکت مهمانان در رویداد.
-                    </p>
-                  </div>
-                  <div className="flex gap-4">
-                    <div className="bg-black/40 border border-white/5 rounded-xl px-4 py-2 shrink-0 text-center">
-                      <div className="text-[10px] text-slate-400 font-mono tracking-widest uppercase mb-1">فضای مصرفی</div>
-                      <div className="text-lg font-bold text-white font-mono" dir="ltr">{analyticsData.totalStorage}</div>
-                    </div>
-                    <div className="bg-black/40 border border-white/5 rounded-xl px-4 py-2 shrink-0 text-center">
-                      <div className="text-[10px] text-slate-400 font-mono tracking-widest uppercase mb-1">مهمانان فعال</div>
-                      <div className="text-lg font-bold text-pink-300 font-mono" dir="ltr">{analyticsData.totalGuests}</div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Upload Timeline Area Chart */}
-                  <div className="lg:col-span-2 p-4 rounded-xl bg-black/40 border border-white/5 h-[260px] flex flex-col">
-                    <h4 className="text-[11px] font-bold text-slate-400 tracking-widest mb-4 flex items-center justify-between">
-                      <span>نمودار دریافت فایل (امروز)</span>
-                    </h4>
-                    {analyticsData.timeline.length > 0 ? (
-                      <ResponsiveContainer width="100%" height="100%">
-                         <AreaChart data={analyticsData.timeline} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                          <defs>
-                            <linearGradient id="colorUploads" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#ec4899" stopOpacity={0.4}/>
-                              <stop offset="95%" stopColor="#ec4899" stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.05)" />
-                          <XAxis dataKey="time" stroke="rgba(255,255,255,0.4)" fontSize={10} tickLine={false} axisLine={false} />
-                          <YAxis stroke="rgba(255,255,255,0.4)" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
-                          <RechartsTooltip 
-                            contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.1)' }} 
-                            itemStyle={{ color: '#fff' }}
-                          />
-                          <Area type="monotone" dataKey="uploads" stroke="#ec4899" strokeWidth={2} fillOpacity={1} fill="url(#colorUploads)" />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    ) : (
-                      <div className="flex-1 flex items-center justify-center text-xs text-slate-500 font-sans border border-dashed border-white/5 rounded-lg bg-black/20">هنوز فایلی دریافت نشده است</div>
-                    )}
-                  </div>
-
-                  {/* Guest Contributions Bar Chart */}
-                  <div className="p-4 rounded-xl bg-black/40 border border-white/5 h-[260px] flex flex-col">
-                    <h4 className="text-[11px] font-bold text-slate-400 tracking-widest mb-4">بیشترین مشارکت</h4>
-                    {analyticsData.guestCounts.length > 0 ? (
-                      <ResponsiveContainer width="100%" height="100%" dir="ltr">
-                        <BarChart data={analyticsData.guestCounts} layout="vertical" margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(255,255,255,0.05)" />
-                          <XAxis type="number" stroke="rgba(255,255,255,0.4)" fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} hide />
-                          <YAxis dataKey="name" type="category" stroke="rgba(255,255,255,0.6)" fontSize={11} tickLine={false} axisLine={false} width={75} />
-                          <RechartsTooltip 
-                            contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.9)', borderColor: 'rgba(255,255,255,0.1)', borderRadius: '8px' }} 
-                            cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                          />
-                          <Bar dataKey="uploads" fill="#a855f7" radius={[0, 4, 4, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    ) : (
-                       <div className="flex-1 flex items-center justify-center text-xs text-slate-500 font-sans border border-dashed border-white/5 rounded-lg bg-black/20 text-center px-4">در انتظار میهمانان...</div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Face Recognition & Sync */}
-              <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-4" id="face_recognition_deck" dir="rtl">
-                <div>
-                  <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-teal-400 animate-pulse" />
-                    مدیریت و شناسایی چهره‌ها
-                  </h3>
-                  <p className="text-xs text-slate-300 mt-1">
-                    تشخیص خودکار صورت‌ها در تصاویر، فیلتر کردن تصاویر بر اساس افراد و ویرایش نام یا ادغام چهره‌ها.
-                  </p>
-                </div>
-
-                {/* Settings Controls Panel */}
-                <div className="flex flex-col md:flex-row gap-4 justify-between items-start md:items-center bg-black/25 rounded-2xl p-4 border border-white/5">
-                  <div className="w-full md:w-1/2 space-y-1">
-                    <label className="text-xs font-semibold text-slate-300 flex items-center justify-between select-none">
-                      <span>🎚️ میزان حساسیت تطابق چهره:</span>
-                      <span className="font-mono text-teal-300 font-bold bg-teal-500/15 border border-teal-500/20 px-2 py-0.5 rounded-md">{faceTolerance}</span>
-                    </label>
-                    <input 
-                      type="range" 
-                      min="0.25" 
-                      max="0.85" 
-                      step="0.05"
-                      value={faceTolerance} 
-                      disabled={isSyncingFaces}
-                      onChange={e => {
-                        const val = parseFloat(e.target.value);
-                        setFaceTolerance(val);
-                        localStorage.setItem("faceTolerance", val.toString());
-                      }}
-                      className={`w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-teal-400 ${isSyncingFaces ? 'opacity-40 cursor-not-allowed' : ''}`}
-                    />
-                    <div className="flex justify-between text-[9px] text-slate-500 font-mono select-none">
-                      <span>0.25 (آسان‌گیرانه - ادغام بیشتر چهره‌ها)</span>
-                      <span>0.85 (سخت‌گیرانه - پروفایل‌های مجزا و دقیق)</span>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 w-full md:w-auto">
-                    <button type="button"
-                      onClick={handleSyncFaces}
-                      disabled={isSyncingFaces}
-                      className="bg-gradient-to-r from-teal-600 to-teal-500 hover:from-teal-500 hover:to-teal-400 text-white text-xs px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 font-bold shadow-md disabled:opacity-50 cursor-pointer active:scale-95 flex-1 md:flex-none"
+            {/* Confirm Action Modal */}
+            {confirmAction && (
+              <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
+                <div className="bg-slate-900 rounded-2xl border border-slate-700 p-6 max-w-md w-full mx-4 animate-slide-up">
+                  <p className="text-white font-vazir mb-6">{confirmAction.message}</p>
+                  <div className="flex gap-3 justify-end">
+                    <button
+                      onClick={() => setConfirmAction(null)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl transition-all font-vazir"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingFaces ? 'animate-spin' : ''}`} />
-                      {isSyncingFaces ? 'در حال پردازش...' : 'اسکن تصاویر'}
+                      انصراف
                     </button>
-                    <button type="button"
-                      onClick={handleClearFaces}
-                      disabled={isClearingFaces}
-                      className="bg-red-500/10 hover:bg-red-500/25 border border-red-500/25 text-red-200 text-xs px-4 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 font-bold disabled:opacity-50 cursor-pointer active:scale-95"
-                      title="پاک کردن کامل شاخص چهره‌ها و اسکن مجدد"
+                    <button
+                      onClick={() => { confirmAction.onConfirm(); setConfirmAction(null); }}
+                      className="px-4 py-2 bg-red-500 hover:bg-red-400 text-white rounded-xl transition-all font-vazir"
                     >
-                      {isClearingFaces ? 'در حال پاکسازی...' : 'شروع مجدد'}
+                      تایید
                     </button>
                   </div>
                 </div>
+              </div>
+            )}
 
-                {/* Merge selected panel */}
-                {selectedPeopleForMerge.length >= 2 && (
-                  <div className="flex flex-col sm:flex-row items-center justify-between bg-teal-500/10 border border-teal-500/20 rounded-2xl p-4 text-xs text-teal-200 gap-3">
-                    <span className="font-sans text-center sm:text-right">
-                      <strong>{selectedPeopleForMerge.length} چهره</strong> برای ادغام انتخاب شده است. چهره اصلی مقصد را انتخاب کنید:
-                    </span>
-                    <div className="flex gap-2 w-full sm:w-auto justify-end">
-                      <select
-                        onChange={e => {
-                          const targetId = e.target.value;
-                          if (targetId) {
-                            const sourceIds = selectedPeopleForMerge.filter(id => id !== targetId);
-                            handleMergePersons(targetId, sourceIds);
-                          }
-                        }}
-                        className="bg-black/60 border border-teal-500/30 rounded-lg px-2 py-1 text-xs text-white outline-none cursor-pointer"
-                        defaultValue=""
-                      >
-                        <option value="" disabled>انتخاب پروفایل اصلی مقصد...</option>
-                        {selectedPeopleForMerge.map(id => (
-                          <option key={id} value={id}>
-                            {faceProfiles.find(fp => fp.personId === id)?.displayName || id}
-                          </option>
-                        ))}
-                      </select>
+            {/* Tab Content */}
+            <div className="animate-fade-in">
+              {/* Media Tab */}
+              {activeTab === "media" && (
+                <div className="space-y-6">
+                  {/* Media Toolbar */}
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 bg-slate-900/50 rounded-2xl border border-slate-800/50">
+                    <div className="flex flex-wrap items-center gap-3">
                       <button
-                        type="button"
-                        onClick={() => setSelectedPeopleForMerge([])}
-                        className="text-slate-400 hover:text-white px-2 py-1 cursor-pointer transition-colors"
-                      >
-                        لغو
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Profiles Display Section */}
-                {faceProfiles.length > 0 ? (
-                  <div className="bg-black/30 rounded-2xl p-4 border border-white/5 space-y-3">
-                    <p className="text-[11px] text-slate-400 mb-1">{faceProfiles.length} پروفایل چهره شناسایی شده است:</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                      {faceProfiles.map((p: any) => {
-                        const isEditing = editingPersonId === p.personId;
-                        const isSelected = selectedPeopleForMerge.includes(p.personId);
-                        
-                        return (
-                          <div 
-                            key={p.personId} 
-                            className={`group flex items-center justify-between bg-white/5 hover:bg-white/10 rounded-xl p-2.5 border ${isSelected ? 'border-teal-500/50 bg-teal-500/5' : 'border-white/5'} transition-all`}
-                          >
-                            <div className="flex items-center gap-3 flex-1 min-w-0">
-                              {/* Merge Selector Checkbox */}
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={e => {
-                                  setSelectedPeopleForMerge(prev => 
-                                    e.target.checked 
-                                      ? [...prev, p.personId]
-                                      : prev.filter(id => id !== p.personId)
-                                  );
-                                }}
-                                className="rounded accent-teal-500 cursor-pointer w-4 h-4 shrink-0"
-                                title="انتخاب برای ادغام چهره‌ها"
-                              />
-                              
-                              {/* Avatar Crop */}
-                              {p.avatarUrl ? (
-                                <img src={p.avatarUrl} className="w-9 h-9 rounded-lg object-cover shrink-0 border border-white/10" alt="" />
-                              ) : (
-                                <div className="w-9 h-9 bg-black/40 rounded-lg flex items-center justify-center shrink-0 border border-white/5">
-                                  <User className="w-5 h-5 text-teal-400" />
-                                </div>
-                              )}
-                              
-                              {/* Profile Title / Edit Name */}
-                              <div className="flex-1 min-w-0">
-                                {isEditing ? (
-                                  <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-                                    <input
-                                      type="text"
-                                      value={editingName}
-                                      onChange={e => setEditingName(e.target.value)}
-                                      className="bg-black/80 border border-teal-500/50 rounded-lg px-1.5 py-0.5 text-xs text-white w-full max-w-[110px] outline-none"
-                                      autoFocus
-                                      onKeyDown={e => {
-                                        if (e.key === "Enter") handleRenamePerson(p.personId, editingName);
-                                        else if (e.key === "Escape") setEditingPersonId(null);
-                                      }}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRenamePerson(p.personId, editingName)}
-                                      className="text-emerald-400 hover:text-emerald-300 cursor-pointer"
-                                    >
-                                      <Check className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingPersonId(null)}
-                                      className="text-rose-400 hover:text-rose-300 cursor-pointer"
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-1 min-w-0">
-                                    <span className="text-xs text-white truncate font-semibold">{p.displayName}</span>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setEditingPersonId(p.personId);
-                                        setEditingName(p.displayName || p.personId);
-                                      }}
-                                      className="text-slate-400 hover:text-teal-300 transition-colors opacity-0 group-hover:opacity-100 cursor-pointer shrink-0"
-                                      title="تغییر نام پروفایل"
-                                    >
-                                      <FileText className="w-3 h-3" />
-                                    </button>
-                                  </div>
-                                )}
-                                <p className="text-[10px] text-slate-400 mt-0.5">{p.photoCount || 0} عکس</p>
-                              </div>
-                            </div>
-                            
-                            {/* Delete Profile button */}
-                            <div className="flex items-center shrink-0 mr-2">
-                              <button
-                                type="button"
-                                onClick={() => handleDeletePerson(p.personId)}
-                                className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-300 rounded-lg border border-red-500/10 transition-colors cursor-pointer"
-                                title="حذف این پروفایل"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-black/20 border border-dashed border-white/5 rounded-2xl py-6 flex flex-col items-center justify-center text-center">
-                    <Users className="w-8 h-8 text-slate-500 mb-2" />
-                    <p className="text-xs text-slate-400 font-sans">هیچ چهره‌ای شناسایی نشده است.</p>
-                    <p className="text-[10px] text-slate-500 mt-0.5">برای شروع، دکمه «اسکن تصاویر» را بزنید.</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Dynamic Local Save & Hot-Swap Sync Host controls */}
-              <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-6" id="save_and_sync_deck">
-                <div>
-                  <h3 className="text-base font-display font-medium text-white flex items-center gap-2">
-                    <Folder className="w-5 h-5 text-pink-400" />
-                    Target Physical Folder & Local syncing
-                  </h3>
-                  <p className="text-xs text-slate-300 mt-1">
-                    Control exactly where guest memories are committed on your hard drive, or download the lightweight desktop agent to stream photos/videos directly in high-res!
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 gap-6 p-4 rounded-xl bg-black/40 border border-white/5">
-                  {/* Left sync controls */}
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-350 mb-1" dir="rtl">
-                        مسیر اصلی ذخیره‌سازی فایل‌ها روی سیستم / هارد اکسترنال:
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          className="flex-1 bg-black/40 border border-white/5 rounded-lg py-1.5 px-3 text-xs font-mono text-white focus:outline-hidden focus:ring-1 focus:ring-pink-500"
-                          value={activeSyncDir}
-                          onChange={(e) => {
-                            setActiveSyncDir(e.target.value);
-                          }}
-                          placeholder="e.g. D:\Wedding or E:\External_SSD"
-                        />
-                        <button type="button"
-                          onClick={() => handleUpdateSyncSettings({ saveDirectory: activeSyncDir })}
-                          className="bg-pink-600/30 hover:bg-pink-600/50 border border-pink-500/40 text-pink-200 text-xs px-3 rounded-lg font-medium transition-all cursor-pointer"
-                        >
-                          ثبت مسیر جدید
-                        </button>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1.5 leading-relaxed" dir="rtl">
-                        💡 <strong>نکته هارد اکسترنال:</strong> مسیر پیش‌فرض <code className="bg-purple-950/40 text-purple-300 px-1 py-0.5 rounded font-mono text-[9px] border border-purple-500/20">D:\Wedding</code> است. در صورت اتصال اس‌اس‌دی یا هارد اکسترنال (مثلاً درایو <code className="bg-purple-950/40 text-purple-300 px-1 py-0.5 rounded font-mono text-[9px] border border-purple-500/20">E:\Wedding</code>)، کافیست مسیر را تغییر داده و روی «ثبت مسیر جدید» کلیک کنید.
-                      </p>
-                    </div>
-
-                    <div>
-                      <div className="flex items-center justify-between">
-                        <label className="block text-xs font-semibold text-slate-300">
-                          Automatic Synced Reveal Status
-                        </label>
-                        <span className={`text-[10px] font-mono py-0.5 px-2 rounded-full uppercase border ${selectedEvent.isRevealed ? 'bg-green-500/20 text-green-300 border-green-500/30' : 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30'}`}>
-                          {selectedEvent.isRevealed ? "Developed / Instant" : "Locked / Developing"}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 mt-1 mb-2">
-                        If delayed-reveal, click below to develop the physical negatives so all guests can look at the album.
-                      </p>
-                      <button type="button"
-                        onClick={() => handleUpdateSyncSettings({ isRevealed: !selectedEvent.isRevealed })}
-                        className={`w-full py-1.5 px-3 rounded-lg text-xs font-semibold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                          selectedEvent.isRevealed 
-                            ? 'bg-white/10 hover:bg-white/20 text-white border border-white/10' 
-                            : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 text-white shadow-xs'
+                        onClick={() => setSelectMode(!selectMode)}
+                        className={`flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                          selectMode
+                            ? "bg-red-500/20 text-red-300 border border-red-500/30"
+                            : "bg-slate-800/50 text-slate-300 hover:bg-slate-700/50 border border-slate-700/50"
                         }`}
                       >
-                        {selectedEvent.isRevealed ? <Eye className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-                        {selectedEvent.isRevealed ? "Lock Album Film (Delayed Mode)" : "Develop Prints / Reveal Album Now!"}
+                        <CheckSquare className="w-4 h-4" />
+                        <span className="font-vazir">{selectMode ? "انصراف انتخاب" : "حالت انتخاب"}</span>
                       </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Uploaded Media items overview */}
-              <div className="glass-card rounded-3xl p-6 shadow-2xl space-y-4" id="uploaded_grid_deck">
-                <div className="flex items-center justify-between border-b border-white/10 pb-3 gap-2 flex-wrap" dir="rtl">
-                  <div>
-                    <h3 className="text-base font-display font-medium text-white">
-                      دیوار عکس‌های مراسم ({mediaItems.length} فایل)
-                    </h3>
-                    <p className="text-xs text-slate-350 mt-0.5">مشاهده عکس‌ها و مدیریت فایل‌ها</p>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    {selectMode ? (
-                      <>
-                        <button type="button"
-                          onClick={selectAllVisibleMedia}
-                          className="text-xs px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-slate-200 transition-all cursor-pointer border border-white/10 flex items-center gap-1.5"
-                        >
-                          <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
-                          انتخاب همه
-                        </button>
-                        {selectedIds.size > 0 && (
-                          <button type="button"
+                      {selectMode && (
+                        <>
+                          <button
+                            onClick={selectAllVisibleMedia}
+                            disabled={selectedIds.size === mediaItems.length}
+                            className="px-3 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-xl transition-all text-sm font-vazir border border-slate-700/50 disabled:opacity-50"
+                          >
+                            همه را انتخاب
+                          </button>
+                          <button
                             onClick={deselectAllMedia}
-                            className="text-xs px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-slate-300 transition-all cursor-pointer border border-white/10"
+                            disabled={selectedIds.size === 0}
+                            className="px-3 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-xl transition-all text-sm font-vazir border border-slate-700/50 disabled:opacity-50"
                           >
                             لغو انتخاب
                           </button>
-                        )}
-                        <button type="button"
-                          onClick={handleDeleteSelectedMedia}
-                          disabled={selectedIds.size === 0 || isBatchDeleting}
-                          className="text-xs px-3.5 py-1.5 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-500 hover:to-red-400 border border-rose-500/30 text-white rounded-xl transition-all cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5 font-bold shadow-lg"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          حذف ({selectedIds.size})
-                        </button>
-                        <button type="button"
-                          onClick={() => { deselectAllMedia(); setSelectMode(false); }}
-                          className="p-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-slate-300 cursor-pointer transition-all border border-white/10"
-                          title="بستن حالت انتخاب"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        {mediaItems.length > 0 && (
-                          <button type="button"
-                            onClick={() => setSelectMode(true)}
-                            className="text-xs px-3.5 py-1.5 bg-white/10 hover:bg-white/20 border border-white/15 text-rose-300 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 font-medium"
+                          <button
+                            onClick={handleDeleteSelectedMedia}
+                            disabled={selectedIds.size === 0 || isBatchDeleting}
+                            className="px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 rounded-xl transition-all text-sm font-vazir border border-red-500/30 disabled:opacity-50 flex items-center gap-2"
                           >
-                            <CheckSquare className="w-3.5 h-3.5" />
-                            انتخاب چندتایی
+                            <Trash2 className="w-4 h-4" />
+                            حذف انتخاب‌ها ({selectedIds.size})
                           </button>
-                        )}
-                        <button type="button"
-                          onClick={() => fetchMedia(selectedEventId)} 
-                          className="p-1.5 text-slate-300 hover:text-white rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
-                          title="به روز رسانی گالری"
-                        >
-                          <RefreshCw className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                {mediaItems.length === 0 ? (
-                  <div className="py-16 text-center text-slate-400 bg-black/20 border border-dashed border-white/10 rounded-2xl flex flex-col items-center justify-center p-6 font-sans">
-                    <Image className="w-10 h-10 text-slate-400 mb-2 stroke-1" />
-                    <p className="text-sm font-medium text-slate-205 text-white">فایلی دریافت نشده است</p>
-                    <p className="text-xs text-slate-400 mt-1 max-w-xs leading-normal">
-                      برای اشتراک گذاری عکس و ویدیو از لینک مهمان استفاده کنید.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4" id="admin_media_grid">
-                    {mediaItems.map((m, idx) => {
-                      const isSelected = selectedIds.has(m.id);
-                      return (
-                        <div 
-                          key={m.id} 
-                          onClick={() => {
-                            if (selectMode) toggleSelectMedia(m.id);
-                            else setActiveLightboxIndex(idx);
-                          }} 
-                          className={`relative group bg-white/5 border rounded-xl overflow-hidden flex flex-col justify-between shadow-lg transition-all font-sans cursor-pointer ${
-                            isSelected 
-                              ? "ring-2 ring-rose-500 border-rose-500/80 bg-rose-500/10" 
-                              : "border-white/15 hover:border-pink-500/40"
-                          }`}
-                        >
-                          {/* Selection Checkbox Overlay */}
-                          {selectMode && (
-                            <div className="absolute top-2 left-2 z-20">
-                              <div className={`w-6 h-6 rounded-lg flex items-center justify-center border-2 transition-all shadow-md ${
-                                isSelected ? "bg-rose-500 border-rose-400" : "bg-black/60 border-white/50"
-                              }`}>
-                                <Check className={`w-3.5 h-3.5 ${isSelected ? "text-white" : "text-transparent"}`} strokeWidth={3} />
-                              </div>
-                            </div>
-                          )}
-                        
-                        {/* Media display content */}
-                        <div className="relative aspect-square w-full bg-slate-950 flex items-center justify-center overflow-hidden">
-                          {m.type === "video" ? (
-                            <div className="relative w-full h-full">
-                              <video 
-                                src={m.url} 
-                                className="w-full h-full object-cover" 
-                                controls 
-                                playsInline 
-                                referrerPolicy="no-referrer"
-                              />
-                              <span className="absolute top-2 right-2 bg-slate-900/80 text-white text-[9px] font-semibold py-0.5 px-2 rounded-full flex items-center gap-0.5">
-                                <Video className="w-2.5 h-2.5 text-red-500" />
-                                {m.duration ? `${m.duration}s` : "vdo"}
-                              </span>
-                            </div>
-                          ) : (
-                            <img
-                              src={m.thumbnailUrl || m.url}
-                              alt={`Snapped by ${m.guestName}`}
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                              loading="lazy"
-                              onError={(e) => {
-                                const target = e.currentTarget;
-                                if (target.src.includes('/api/thumbnail/')) return;
-                                if (target.src === m.url) return;
-                                target.src = `/api/thumbnail/${selectedEventId}/${m.id}`;
-                              }}
-                            />
-                          )}
-
-                          {/* Filter applied overlay */}
-                          <div className="absolute bottom-2 left-2 pointer-events-none">
-                            <span className="bg-black/70 backdrop-blur-xs text-white text-[9px] font-mono py-0.5 px-1.5 rounded uppercase">
-                              {FILM_FILTERS.find(f => f.id === m.filter)?.name || m.filter}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Description content */}
-                        <div className="p-2.5 bg-black/35 text-slate-200 text-xs flex flex-col justify-between flex-1 gap-2 border-t border-white/10">
-                          <div className="min-w-0" dir="rtl">
-                            <div className="font-semibold text-white truncate text-right">عکاس: {m.guestName}</div>
-                            <div className="text-[9px] text-slate-400 mt-0.5 truncate tracking-widest font-mono text-right" dir="ltr">
-                              {new Date(m.timestamp).toLocaleTimeString("fa-IR", { hour: '2-digit', minute: '2-digit' })}
-                            </div>
-                          </div>
-                          
-                          <div className="flex items-center justify-between border-t border-white/5 pt-2 shrink-0">
-                            <div className="flex items-center gap-1">
-                              <button type="button"
-                                onClick={() => handleDeleteMedia(m.id)}
-                                className="text-slate-400 hover:text-red-400 transition-colors py-0.5 px-1 hover:bg-white/5 rounded"
-                                title="حذف"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                              <button type="button"
-                                onClick={() => handleLikeMedia(m.id)}
-                                disabled={likedMedia.has(m.id)}
-                                className={`transition-colors flex items-center gap-1 text-[11px] font-medium py-0.5 px-1 rounded ${
-                                  likedMedia.has(m.id)
-                                    ? 'text-rose-400 cursor-default'
-                                    : 'text-slate-300 hover:text-rose-400 hover:bg-white/5 cursor-pointer'
-                                }`}
-                              >
-                                <Heart className={`w-3.5 h-3.5 ${likedMedia.has(m.id) ? 'text-rose-500 fill-rose-500' : 'text-current'}`} />
-                                <span>{m.likes || 0}</span>
-                              </button>
-                            </div>
-                            
-                            <span 
-                              className="text-[9px] bg-white/5 text-slate-405 font-mono py-0.5 px-1.5 rounded border border-white/10 max-w-[100px] truncate"
-                              title={m.systemSavePath}
-                              dir="ltr"
-                            >
-                              {m.systemSavePath ? m.systemSavePath.split(/[/\\]/).pop() : "No-local"}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  </div>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="glass-card rounded-3xl p-12 text-center shadow-2xl flex flex-col items-center justify-center space-y-4" id="workspace_empty" dir="rtl">
-              <QrCode className="w-16 h-16 text-pink-400 shrink-0 stroke-1 animate-pulse" />
-              <div>
-                <h3 className="text-lg font-display font-medium text-white">یک رویداد ایجاد کنید یا انتخاب کنید</h3>
-                <p className="text-sm text-slate-300 max-w-sm mx-auto mt-1 leading-normal">
-                  از منوی کناری رویداد مورد نظر را انتخاب کنید و یا با زدن دکمه زیر یک مراسم جدید بسازید.
-                </p>
-              </div>
-              <button type="button"
-                onClick={() => setShowCreateModal(true)}
-                className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-semibold py-2 px-6 rounded-xl text-sm shadow-md transition-all cursor-pointer"
-              >
-                ایجاد مراسم جدید
-              </button>
-            </div>
-          )}
-        </div>
-
-      </div>
-
-      {/* CREATE EVENT MODAL DIALOG */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-fade-in" id="create_modal">
-          <div className="backdrop-blur-3xl bg-slate-900/95 rounded-3xl w-full max-w-lg overflow-hidden border border-white/20 shadow-2xl flex flex-col">
-            <div className="bg-white/5 border-b border-white/10 p-6">
-              <h3 className="text-xl font-display font-medium text-white">Instantiate Event Environment</h3>
-              <p className="text-xs text-slate-350 mt-1">Boot up a digital polaroid dashboard with upload limits and filter decks.</p>
-            </div>
-
-            <form onSubmit={handleCreateEvent} className="p-6 space-y-4 text-xs font-sans text-slate-200">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Event Domain Code (Slug)*
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    className="w-full bg-black/40 border border-white/10 rounded-xl py-2 px-3 focus:outline-hidden focus:ring-1 focus:ring-pink-500 text-white font-mono text-xs uppercase"
-                    placeholder="sarah-wedding"
-                    value={formId}
-                    onChange={(e) => setFormId(e.target.value)}
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">Safe URL slug. e.g. sarah-wedding</p>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Host Organiser Name
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl py-2 px-3 focus:outline-hidden focus:ring-1 focus:ring-pink-500 text-white text-xs"
-                    placeholder="Sophia Miller"
-                    value={formHost}
-                    onChange={(e) => setFormHost(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                  Event Display Title*
-                </label>
-                <input
-                  type="text"
-                  required
-                  className="w-full bg-black/40 border border-white/10 rounded-xl py-2 px-3 focus:outline-hidden focus:ring-1 focus:ring-pink-500 text-white text-xs"
-                  placeholder="e.g. Sarah & Mark's Golden Wedding"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                  Wedding Greeting / Info text
-                </label>
-                <textarea
-                  className="w-full bg-black/40 border border-white/10 rounded-xl py-2 px-3 focus:outline-hidden focus:ring-1 focus:ring-pink-500 h-20 text-white text-xs leading-relaxed resize-none"
-                  placeholder="Welcome to our Wedding Disposable! Snap, choose retro filters, record 30-sec toast videos which save straight onto our localhost computer database!"
-                  value={formDesc}
-                  onChange={(e) => setFormDesc(e.target.value)}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Photo Reveal setting
-                  </label>
-                  <select
-                    className="w-full bg-slate-900 border border-white/10 rounded-xl py-2 px-3 focus:outline-hidden focus:ring-1 focus:ring-pink-500 text-white text-xs"
-                    value={formReveal}
-                    onChange={(e: any) => setFormReveal(e.target.value)}
-                  >
-                    <option value="instant" className="bg-slate-900 text-white">Instant Digital Album</option>
-                    <option value="delay" className="bg-slate-900 text-white">Delayed Disposable Reveal (reveals later)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Direct local Server Save Dir
-                  </label>
-                  <input
-                    type="text"
-                    className="w-full bg-black/40 border border-white/10 rounded-xl py-2 px-3 focus:outline-hidden focus:ring-1 focus:ring-pink-500 font-mono text-white text-xs"
-                    value={formSaveDir}
-                    onChange={(e) => setFormSaveDir(e.target.value)}
-                    placeholder="./uploads"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 p-4 bg-black/45 border border-white/10 rounded-2xl">
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-pink-300 mb-1">
-                    📸 Photo Limit per Guest
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    className="w-full bg-black/30 border border-white/15 rounded-lg py-1.5 px-3 focus:outline-hidden focus:ring-1 focus:ring-pink-500 text-white text-xs"
-                    value={formImgLimit}
-                    onChange={(e) => setFormImgLimit(Number(e.target.value))}
-                  />
-                  <p className="text-[9px] text-slate-450 mt-0.5">0 = Unlimited snaps</p>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-pink-300 mb-1">
-                    🎥 Video Limit per Guest (30s)
-                  </label>
-                  <input
-                    type="number"
-                    min="0"
-                    className="w-full bg-black/30 border border-white/15 rounded-lg py-1.5 px-3 focus:outline-hidden focus:ring-1 focus:ring-pink-500 text-white text-xs"
-                    value={formVidLimit}
-                    onChange={(e) => setFormVidLimit(Number(e.target.value))}
-                  />
-                  <p className="text-[9px] text-slate-450 mt-0.5">0 = Unlimited snaps</p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="bg-white/10 hover:bg-white/15 text-slate-300 font-medium py-2 px-4 rounded-xl cursor-pointer transition-all"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold py-2 px-5 rounded-xl shadow-md cursor-pointer transition-all active:scale-95"
-                >
-                  Deploy Deck
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Card Studio Modal — Redesigned for Fatemeh & Hamid */}
-      {showCardStudio && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-xl flex items-center justify-center p-3 md:p-6 z-50 animate-fade-in font-sans" dir="rtl">
-          <div className="backdrop-blur-3xl bg-[#20141a]/95 rounded-3xl w-full max-w-4xl overflow-hidden border border-amber-500/30 shadow-2xl flex flex-col max-h-[92vh]">
-            
-            {/* Modal Header */}
-            <div className="bg-gradient-to-r from-amber-500/10 via-rose-500/10 to-transparent border-b border-white/10 p-4 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-amber-500/20 rounded-xl border border-amber-500/30">
-                  <Printer className="w-5 h-5 text-amber-300" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    کارگاه اختصاصی کارت دعوت و پرینت (Card Studio)
-                  </h3>
-                  <p className="text-[10px] text-amber-200/80 mt-0.5">
-                    طراحی کارت دعوت شیک برای {selectedEvent?.name || "مراسم عروسی فاطمه و حمید"}
-                  </p>
-                </div>
-              </div>
-              <button type="button" onClick={() => setShowCardStudio(false)}
-                className="p-2 bg-white/5 hover:bg-white/15 rounded-xl text-white/70 hover:text-white transition-all cursor-pointer border border-white/10">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Modal Content Body: Grid Layout */}
-            <div className="p-5 overflow-y-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
-              
-              {/* Left Column (Lg: 7 cols): Controls & Inputs */}
-              <div className="lg:col-span-7 space-y-4">
-                
-                {/* 1. Theme Presets Selection */}
-                <div className="bg-white/5 rounded-2xl p-3.5 border border-white/10 space-y-2.5">
-                  <h4 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    انتخاب قالب و استایل کارت
-                  </h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCardTheme("cream")}
-                      className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${cardTheme === "cream" ? "bg-amber-500/20 border-amber-400 ring-2 ring-amber-400/40 text-amber-200" : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20"}`}
-                    >
-                      <span className="text-xs font-bold flex items-center justify-between">
-                        👑 عاجی و طلا
-                        <span className="w-3 h-3 rounded-full bg-[#faf6ee] border border-[#c2933d] inline-block" />
-                      </span>
-                      <span className="text-[9px] text-slate-400">کاغذ عاجی با حاشیه طلایی کلاسیک</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setCardTheme("slate")}
-                      className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${cardTheme === "slate" ? "bg-rose-500/20 border-rose-400 ring-2 ring-rose-400/40 text-rose-200" : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20"}`}
-                    >
-                      <span className="text-xs font-bold flex items-center justify-between">
-                        🍷 رز و مخمل
-                        <span className="w-3 h-3 rounded-full bg-[#120a1c] border border-[#f43f5e] inline-block" />
-                      </span>
-                      <span className="text-[9px] text-slate-400">زمینه مخمل سورمه‌ای با رز گلد</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setCardTheme("sage")}
-                      className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${cardTheme === "sage" ? "bg-emerald-500/20 border-emerald-400 ring-2 ring-emerald-400/40 text-emerald-200" : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20"}`}
-                    >
-                      <span className="text-xs font-bold flex items-center justify-between">
-                        🌿 زیتونی و طراوت
-                        <span className="w-3 h-3 rounded-full bg-[#f4f6f4] border border-[#2d4a34] inline-block" />
-                      </span>
-                      <span className="text-[9px] text-slate-400">سبز طراوت‌بخش با قاب طبیعی</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setCardTheme("neon")}
-                      className={`p-2.5 rounded-xl border text-right transition-all cursor-pointer flex flex-col gap-1 ${cardTheme === "neon" ? "bg-purple-500/20 border-purple-400 ring-2 ring-purple-400/40 text-purple-200" : "bg-white/5 border-white/10 text-slate-300 hover:border-white/20"}`}
-                    >
-                      <span className="text-xs font-bold flex items-center justify-between">
-                        🔮 شب و نئون
-                        <span className="w-3 h-3 rounded-full bg-[#0a0710] border border-[#c084fc] inline-block" />
-                      </span>
-                      <span className="text-[9px] text-slate-400">زمینه مشکی با خطوط نئونی بنفش</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 2. Paper & Layout Settings */}
-                <div className="bg-white/5 rounded-2xl p-3.5 border border-white/10 space-y-2.5">
-                  <h4 className="text-xs font-bold text-amber-300">تنظیمات پرینت و ابعاد کاغذ</h4>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">اندازه کاغذ</label>
-                      <select 
-                        value={cardPaperSize} 
-                        onChange={e => setCardPaperSize(e.target.value)}
-                        className="bg-black/50 border border-white/15 text-white text-xs rounded-xl px-3 py-1.5 focus:border-amber-400 outline-none"
+                        </>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="file"
+                        id="media-upload"
+                        accept="image/*,video/*"
+                        multiple
+                        onChange={handleMediaUpload}
+                        className="hidden"
+                      />
+                      <label
+                        htmlFor="media-upload"
+                        className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer shadow-lg"
                       >
-                        {Object.entries(PAPER_SIZES).map(([k, v]) => (
-                          <option key={k} value={k} className="bg-slate-900 text-white">{v.label} ({v.width}×{v.height}")</option>
-                        ))}
-                      </select>
+                        <Upload className="w-4 h-4" />
+                        <span className="font-vazir">آپلود رسانه</span>
+                      </label>
                     </div>
+                  </div>
 
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">جهت کارت</label>
-                      <div className="flex gap-1">
-                        <button type="button" onClick={() => setCardOrientation('portrait')}
-                          className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${cardOrientation === 'portrait' ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-bold' : 'bg-white/5 border-white/10 text-slate-400'}`}>
-                          عمودی
-                        </button>
-                        <button type="button" onClick={() => setCardOrientation('landscape')}
-                          className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${cardOrientation === 'landscape' ? 'bg-amber-500/25 border-amber-400 text-amber-200 font-bold' : 'bg-white/5 border-white/10 text-slate-400'}`}>
-                          افقی
+                  {/* Media Grid */}
+                  {mediaItems.length === 0 ? (
+                    <div className="text-center py-20 bg-slate-900/50 rounded-2xl border border-slate-800/50">
+                      <Image className="w-16 h-16 mx-auto text-slate-600 mb-4" />
+                      <h3 className="text-xl font-semibold text-slate-400 font-vazir mb-2">هنوز رسانه‌ای آپلود نشده</h3>
+                      <p className="text-slate-500 font-vazir">دکمه «آپلود رسانه» را بزنید تا عکس یا ویدیو اضافه کنید</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
+                      {mediaItems.map((media) => (
+                        <MediaCard
+                          key={media.id}
+                          media={media}
+                          selected={selectedIds.has(media.id)}
+                          selectMode={selectMode}
+                          onToggleSelect={toggleSelectMedia}
+                          onDelete={handleDeleteMedia}
+                          onLike={handleLikeMedia}
+                          isLiked={likedMedia.has(media.id)}
+                          onOpenLightbox={() => setActiveLightboxIndex(mediaItems.findIndex(m => m.id === media.id))}
+                          downloadMedia={handleDownload}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Analytics Tab */}
+              {activeTab === "analytics" && (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <StatCard title="مجموع مهمانان" value={analyticsData.totalGuests} icon={Users} color="blue" />
+                    <StatCard title="مجموع رسانه" value={mediaItems.length} icon={Image} color="green" />
+                    <StatCard title="فضای اشغال شده" value={analyticsData.totalStorage} icon={Download} color="amber" />
+                    <StatCard title="پروفایل‌های چهره" value={faceProfiles.length} icon={User} color="purple" />
+                  </div>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <ChartCard title="زمان‌بندی آپلودها">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <AreaChart data={analyticsData.timeline}>
+                          <defs>
+                            <linearGradient id="colorUploads" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3}/>
+                              <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis dataKey="time" stroke="#6b7280" fontSize={11} tick={{ fill: '#9ca3af' }} />
+                          <YAxis stroke="#6b7280" fontSize={11} tick={{ fill: '#9ca3af' }} />
+                          <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }} labelStyle={{ color: '#f3f4f6' }} />
+                          <Area type="monotone" dataKey="uploads" stroke="#f59e0b" fillOpacity={1} fill="url(#colorUploads)" strokeWidth={2} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </ChartCard>
+                    <ChartCard title="بیشترین آپلودکنندگان">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart data={analyticsData.guestCounts} layout="vertical">
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis type="number" stroke="#6b7280" fontSize={11} tick={{ fill: '#9ca3af' }} />
+                          <YAxis dataKey="name" type="category" width={120} stroke="#6b7280" fontSize={11} tick={{ fill: '#9ca3af' }} />
+                          <RechartsTooltip contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }} labelStyle={{ color: '#f3f4f6' }} />
+                          <Bar dataKey="uploads" fill="#8b5cf6" radius={[0, 4, 4, 0]} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </ChartCard>
+                  </div>
+                </div>
+              )}
+
+              {/* Wedding Card Tab */}
+              {activeTab === "card" && (
+                <div className="space-y-6 animate-fade-in">
+                  <div className="p-6 bg-gradient-to-br from-slate-900 via-[#1f151c] to-slate-900 rounded-3xl border border-rose-500/20 shadow-2xl relative overflow-hidden">
+                    {/* Background Ornate Mesh */}
+                    <div className="absolute top-0 right-0 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
+                    <div className="absolute bottom-0 left-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
+
+                    <div className="flex flex-col lg:flex-row items-center justify-between gap-8 relative z-10">
+                      {/* Left side info & CTA */}
+                      <div className="space-y-5 max-w-xl text-right">
+                        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-bold font-vazir">
+                          <Sparkles className="w-4 h-4 text-amber-300" />
+                          طراحی کارت دعوت دیجیتال و چاپی
+                        </div>
+                        <h3 className="text-3xl font-extrabold text-white font-vazir tracking-tight">
+                          استودیو کارت دعوت <span className="bg-gradient-to-r from-rose-400 to-amber-300 bg-clip-text text-transparent">{selectedEvent?.name || "مراسم عروسی"}</span>
+                        </h3>
+                        <p className="text-slate-300 font-vazir text-sm leading-relaxed">
+                          کارت دعوت اختصاصی مراسم همراه با کد QR هوشمند مهمانان، قالب‌های متعددی نظیر طلاي شاهانه، رز مخملی، زیتونی کلاسیک و گزینه‌های سفارشی‌سازی متن، چاپ و دانلود تصویر با کیفیت بالا.
+                        </p>
+
+                        <div className="flex flex-wrap gap-3 pt-2">
+                          <button
+                            onClick={() => setShowCardDesigner(true)}
+                            className="px-6 py-3.5 bg-gradient-to-r from-rose-500 via-pink-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white font-bold rounded-2xl transition-all shadow-xl shadow-rose-500/25 flex items-center gap-2.5 text-sm cursor-pointer transform hover:scale-[1.02]"
+                          >
+                            <Sparkles className="w-5 h-5 text-amber-200 animate-pulse" />
+                            <span className="font-vazir">ورود به استودیو کارت دعوت (ویرایش کامل)</span>
+                          </button>
+
+                          {qrCodeDataUrl && (
+                            <button
+                              onClick={downloadStandaloneQR}
+                              className="px-5 py-3.5 bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 border border-slate-700/80 rounded-2xl transition-all flex items-center gap-2 text-sm cursor-pointer font-vazir"
+                            >
+                              <Download className="w-4 h-4 text-amber-300" />
+                              دانلود کد QR
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right side live interactive Card Preview Box */}
+                      <div className="w-full max-w-sm shrink-0">
+                        <div className="relative rounded-3xl p-6 bg-[#1a131b] border-2 border-amber-500/40 shadow-2xl shadow-rose-950/60 overflow-hidden text-center space-y-4">
+                          {/* Inner gold frame line */}
+                          <div className="absolute inset-2 border border-amber-400/30 rounded-2xl pointer-events-none" />
+                          
+                          <div className="pt-2">
+                            <span className="text-[11px] font-mono tracking-widest text-amber-400 uppercase">مراسم پیوند و جشن ازدواج</span>
+                            <h4 className="text-2xl font-bold text-white font-vazir mt-1">{selectedEvent?.name || "فاطمه & حمید"}</h4>
+                          </div>
+
+                          <div className="py-2 flex items-center justify-center">
+                            {qrCodeDataUrl ? (
+                              <div className="p-3 bg-white rounded-2xl shadow-xl border border-amber-300/40">
+                                <img src={qrCodeDataUrl} alt="Guest QR Code" className="w-44 h-44 object-contain" />
+                              </div>
+                            ) : (
+                              <div className="w-44 h-44 bg-slate-800/50 rounded-2xl border border-slate-700 flex items-center justify-center">
+                                <QrCode className="w-12 h-12 text-slate-500" />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-1 pb-2">
+                            <p className="text-xs text-amber-200 font-vazir">اسکن کنید و عکس‌ها و فیلم‌های خود را ارسال کنید</p>
+                            <p className="text-[10px] text-slate-400 font-mono">PartyIMG ShotBox System</p>
+                          </div>
+
+                          <button
+                            onClick={() => setShowCardDesigner(true)}
+                            className="w-full py-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl text-xs font-vazir font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <Sparkles className="w-4 h-4" />
+                            تغییر قالب و ویرایش کارت
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Faces Tab */}
+              {activeTab === "faces" && (
+                <div className="space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-4 bg-slate-900/50 rounded-2xl border border-slate-800/50">
+                    <h3 className="text-lg font-semibold text-white font-vazir">پروفایل‌های چهره شناسایی شده</h3>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        <label className="text-sm text-slate-400 font-vazir">تلrance:</label>
+                        <input
+                          type="range"
+                          min="0.05"
+                          max="0.7"
+                          step="0.05"
+                          value={faceTolerance}
+                          onChange={(e) => setFaceTolerance(parseFloat(e.target.value))}
+                          className="w-32 accent-amber-500"
+                        />
+                        <span className="text-sm font-mono text-amber-300 w-10">{faceTolerance.toFixed(2)}</span>
+                      </div>
+                      <button
+                        onClick={handleSyncFaces}
+                        disabled={isSyncingFaces}
+                        className="px-4 py-2 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${isSyncingFaces ? 'animate-spin' : ''}`} />
+                        <span className="font-vazir">{isSyncingFaces ? 'در حال پردازش...' : 'شناسایی چهره'}</span>
+                      </button>
+                      <button
+                        onClick={handleClearFaces}
+                        disabled={isClearingFaces}
+                        className="px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-xl transition-all cursor-pointer border border-slate-700/50 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span className="font-vazir text-sm">پاک کردن شاخص</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {faceProfiles.length === 0 ? (
+                    <div className="text-center py-20 bg-slate-900/50 rounded-2xl border border-slate-800/50">
+                      <User className="w-16 h-16 mx-auto text-slate-600 mb-4" />
+                      <h3 className="text-xl font-semibold text-slate-400 font-vazir mb-2">هیچ پروفایل چهره‌ای یافت نشد</h3>
+                      <p className="text-slate-500 font-vazir mb-6">دکمه «شناسایی چهره» را بزنید تا تصاویر اسکن شوند</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                      {faceProfiles.map((profile) => (
+                        <FaceProfileCard
+                          key={profile.personId}
+                          profile={profile}
+                          editing={editingPersonId === profile.personId}
+                          editName={editingName}
+                          onEditClick={() => { setEditingPersonId(profile.personId); setEditingName(profile.displayName || `شخص ${profile.personId.slice(0,6)}`); }}
+                          onSaveClick={() => handleRenamePerson(profile.personId, editingName)}
+                          onCancelClick={() => { setEditingPersonId(null); setEditingName(""); }}
+                          onDeleteClick={() => handleDeletePerson(profile.personId)}
+                          onMergeClick={() => { if (selectedPeopleForMerge.includes(profile.personId)) { setSelectedPeopleForMerge(prev => prev.filter(id => id !== profile.personId)); } else { setSelectedPeopleForMerge(prev => [...prev, profile.personId]); } }}
+                          isSelectedForMerge={selectedPeopleForMerge.includes(profile.personId)}
+                          canMerge={selectedPeopleForMerge.length > 0 && selectedPeopleForMerge[0] !== profile.personId}
+                          onMergeInto={() => handleMergePersons(selectedPeopleForMerge[0], [profile.personId])}
+                        />
+                      ))}
+                    </div>
+                  )}
+
+                  {selectedPeopleForMerge.length > 0 && (
+                    <div className="p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="w-2 h-2 bg-amber-400 rounded-full animate-pulse" />
+                          <span className="text-amber-300 font-vazir">{selectedPeopleForMerge.length} پروفایل برای ادغام انتخاب شده</span>
+                        </div>
+                        <button
+                          onClick={() => setSelectedPeopleForMerge([])}
+                          className="px-3 py-1.5 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-xl transition-all text-sm font-vazir border border-slate-700/50"
+                        >
+                          لغو
                         </button>
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
 
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">راهنمای برش (Bleed)</label>
-                      <button type="button" onClick={() => setCardShowBleed(p => !p)}
-                        className={`text-xs px-3 py-1.5 rounded-xl border transition-all cursor-pointer ${cardShowBleed ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300 font-bold' : 'bg-white/5 border-white/10 text-slate-400'}`}>
-                        ۳ میلی‌متر {cardShowBleed ? 'فعال' : 'غیرفعال'}
+              {/* Sync Tab */}
+              {activeTab === "sync" && (
+                <div className="space-y-6">
+                  <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6">
+                    <h3 className="text-lg font-semibold text-white font-vazir mb-6">تنظیمات همگام‌سازی محلی</h3>
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-white font-vazir">فعال‌سازی همگام‌سازی محلی</p>
+                          <p className="text-sm text-slate-400 font-vazir">ارسال خودکار فایل‌ها به سرور محلی</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={localSyncEnabled}
+                            onChange={(e) => {
+                              setLocalSyncEnabled(e.target.checked);
+                              handleUpdateSyncSettings({ localSyncEnabled: e.target.checked });
+                            }}
+                            className="sr-only peer"
+                          />
+                          <div className="w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-500/20 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                        </label>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">آدرس سرور محلی</label>
+                        <input
+                          type="text"
+                          value={localSyncHost}
+                          onChange={(e) => {
+                            setLocalSyncHost(e.target.value);
+                            handleUpdateSyncSettings({ localSyncHost: e.target.value });
+                          }}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-mono text-sm"
+                          placeholder="http://localhost:8080"
+                        />
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">دایرکتوری ذخیره‌سازی فعال</label>
+                        <input
+                          type="text"
+                          value={activeSyncDir}
+                          onChange={(e) => {
+                            setActiveSyncDir(e.target.value);
+                            handleUpdateSyncSettings({ saveDirectory: e.target.value });
+                          }}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-mono text-sm"
+                          placeholder="D:\\Wedding"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6">
+                    <h3 className="text-lg font-semibold text-white font-vazir mb-4">کد QR مستقل مهمان</h3>
+                    <p className="text-slate-400 font-vazir mb-6">این کد QR مستقیماً به صفحه آپلود مهمان‌ها اشاره دارد (بدون واسطه لندینگ).</p>
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
+                      <div className="p-4 bg-white rounded-xl">
+                        {qrCodeDataUrl ? (
+                          <img src={qrCodeDataUrl} alt="Guest QR Code" className="w-64 h-64" />
+                        ) : (
+                          <div className="w-64 h-64 flex items-center justify-center bg-slate-200 text-slate-400 font-vazir">در حال تولید...</div>
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-3">
+                        <button
+                          onClick={downloadStandaloneQR}
+                          className="px-6 py-3 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white font-semibold rounded-xl transition-all cursor-pointer shadow-lg flex items-center gap-2"
+                        >
+                          <Download className="w-5 h-5" />
+                          <span className="font-vazir">دانلود کد QR</span>
+                        </button>
+                        <button
+                          onClick={copyGuestLink}
+                          className="px-6 py-3 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-xl transition-all cursor-pointer border border-slate-700/50 flex items-center gap-2"
+                        >
+                          <Clipboard className="w-5 h-5" />
+                          <span className="font-vazir">{copiedLink ? 'کپی شد!' : 'کپی لینک مهمان'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Settings Tab */}
+              {activeTab === "settings" && (
+                <div className="space-y-6">
+                  <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6">
+                    <h3 className="text-lg font-semibold text-white font-vazir mb-6">تنظیمات رویداد</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div>
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">نام رویداد</label>
+                        <input
+                          type="text"
+                          value={selectedEvent?.name || ""}
+                          onChange={(e) => handleUpdateSyncSettings({ name: e.target.value })}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">نام میزبان</label>
+                        <input
+                          type="text"
+                          value={selectedEvent?.hostName || ""}
+                          onChange={(e) => handleUpdateSyncSettings({ hostName: e.target.value })}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">تاریخ رویداد</label>
+                        <input
+                          type="text"
+                          value={selectedEvent?.date || ""}
+                          onChange={(e) => handleUpdateSyncSettings({ date: e.target.value })}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">آدرس مهمان سفارشی</label>
+                        <div className="flex gap-2">
+                          <span className="flex items-center px-4 bg-slate-800/50 border border-slate-700 rounded-xl text-slate-400 font-mono">http://192.168.70.32:80/</span>
+                          <input
+                            type="text"
+                            value={customGuestAddress}
+                            onChange={(e) => setCustomGuestAddress(e.target.value)}
+                            className="flex-1 bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                            placeholder="custom-name"
+                          />
+                        </div>
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">توضیحات رویداد</label>
+                        <textarea
+                          value={selectedEvent?.description || ""}
+                          onChange={(e) => handleUpdateSyncSettings({ description: e.target.value })}
+                          rows={3}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir resize-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">حد عکس (0 = نامحدود)</label>
+                        <input
+                          type="number"
+                          value={selectedEvent?.imageLimit || 0}
+                          onChange={(e) => handleUpdateSyncSettings({ imageLimit: parseInt(e.target.value) || 0 })}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                          min="0"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">حد ویدیو (0 = نامحدود)</label>
+                        <input
+                          type="number"
+                          value={selectedEvent?.videoLimit || 0}
+                          onChange={(e) => handleUpdateSyncSettings({ videoLimit: parseInt(e.target.value) || 0 })}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                          min="0"
+                        />
+                      </div>
+                      <div className="md:col-span-2">
+                        <label className="block text-sm text-slate-400 font-vazir mb-1">سبک نمایش</label>
+                        <select
+                          value={selectedEvent?.revealStyle || "instant"}
+                          onChange={(e) => handleUpdateSyncSettings({ revealStyle: e.target.value })}
+                          className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                        >
+                          <option value="instant">فوری (Instant)</option>
+                          <option value="delay">با تاخیر (Delay)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6">
+                    <h3 className="text-lg font-semibold text-white font-vazir mb-6">عملیات خطرناک</h3>
+                    <div className="flex flex-col sm:flex-row gap-4">
+                      <button
+                        onClick={() => handleDeleteEvent(selectedEventId!)}
+                        className="flex-1 px-6 py-3 bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 rounded-xl transition-all cursor-pointer border border-red-500/30 flex items-center justify-center gap-2"
+                      >
+                        <Trash2 className="w-5 h-5" />
+                        <span className="font-vazir font-semibold">حذف رویداد و تمام داده‌ها</span>
                       </button>
                     </div>
                   </div>
                 </div>
-
-                {/* 3. Customizable Card Content Inputs */}
-                <div className="bg-white/5 rounded-2xl p-3.5 border border-white/10 space-y-3">
-                  <h4 className="text-xs font-bold text-amber-300">محتوا و متن‌های کارت</h4>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">پیام خوش‌آمدگویی اولیه</label>
-                      <input 
-                        type="text" 
-                        value={cardGreeting} 
-                        onChange={e => setCardGreeting(e.target.value)}
-                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">عنوان اصلی رویداد</label>
-                      <input 
-                        type="text" 
-                        value={cardTitle} 
-                        onChange={e => setCardTitle(e.target.value)}
-                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">زیرعنوان و شعار دعوت</label>
-                    <input 
-                      type="text" 
-                      value={cardSubtitle} 
-                      onChange={e => setCardSubtitle(e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">راهنمای مهمانان در کارت</label>
-                    <textarea 
-                      rows={2}
-                      value={cardInstructions} 
-                      onChange={e => setCardInstructions(e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none resize-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-400 block mb-1">پانویس کارت (امضا/تاریخ)</label>
-                    <input 
-                      type="text" 
-                      value={cardFooter} 
-                      onChange={e => setCardFooter(e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column (Lg: 5 cols): Real-Time Live Card Preview */}
-              <div className="lg:col-span-5 flex flex-col items-center justify-center space-y-4">
-                <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5 self-start">
-                  <Eye className="w-3.5 h-3.5 text-amber-400" />
-                  پیش‌نمایش زنده کارت دعوت
-                </span>
-
-                <div 
-                  id="card-preview" 
-                  className={`w-full transition-all duration-300 ${cardOrientation === 'portrait' ? 'max-w-[310px]' : 'max-w-[400px]'}`}
-                  style={{ aspectRatio: cardOrientation === 'portrait' ? `${PAPER_SIZES[cardPaperSize].width}/${PAPER_SIZES[cardPaperSize].height}` : `${PAPER_SIZES[cardPaperSize].height}/${PAPER_SIZES[cardPaperSize].width}` }}
-                >
-                  <div 
-                    className={`w-full h-full rounded-2xl overflow-hidden shadow-2xl relative flex flex-col justify-between p-5 text-center transition-all ${
-                      cardTheme === 'cream' ? 'bg-[#faf6ee] text-[#1a202c] border-4 border-double border-[#c2933d]' :
-                      cardTheme === 'slate' ? 'bg-gradient-to-b from-[#120a1c] to-[#090d16] text-white border-2 border-rose-500/40' :
-                      cardTheme === 'sage' ? 'bg-[#f4f6f4] text-[#1e3022] border-4 border-double border-[#2d4a34]' :
-                      'bg-[#0a0710] text-white border-4 border-purple-500/50 shadow-[0_0_20px_rgba(192,132,252,0.3)]'
-                    }`}
-                  >
-                    {cardShowBleed && (
-                      <div className="absolute inset-0 border-2 border-dashed border-red-400/40 rounded-2xl m-[3mm] pointer-events-none z-10" />
-                    )}
-
-                    {/* Card Preview Header */}
-                    <div>
-                      <p className={`text-[9px] font-bold tracking-widest uppercase ${cardTheme === 'cream' ? 'text-[#b45309]' : cardTheme === 'sage' ? 'text-[#3f5e46]' : 'text-rose-400'}`}>
-                        {cardGreeting}
-                      </p>
-                      <h2 className="text-base font-bold mt-1 leading-tight font-display">
-                        {cardTitle || "مراسم عروسی فاطمه و حمید"}
-                      </h2>
-                      <p className="text-[9.5px] opacity-80 mt-0.5 font-medium">
-                        {cardSubtitle}
-                      </p>
-                      <div className={`w-16 h-0.5 mx-auto my-2 rounded-full ${cardTheme === 'cream' ? 'bg-[#c2933d]/40' : cardTheme === 'sage' ? 'bg-[#2d4a34]/40' : 'bg-rose-500/40'}`} />
-                    </div>
-
-                    {/* QR Code Container in Card */}
-                    <div className="relative my-2 inline-block mx-auto">
-                      <div className="bg-white p-2.5 rounded-2xl shadow-lg border border-black/10 inline-block relative">
-                        {qrCodeDataUrl && <img src={qrCodeDataUrl} className="w-28 h-28 rounded-lg" alt="QR" />}
-                      </div>
-                    </div>
-
-                    {/* Card Instructions & Footer */}
-                    <div>
-                      <p className="text-[9px] leading-relaxed max-w-[90%] mx-auto opacity-90 font-medium">
-                        {cardInstructions}
-                      </p>
-                      <p className={`text-[8.5px] mt-2 font-bold opacity-75 ${cardTheme === 'cream' ? 'text-[#8a734e]' : cardTheme === 'sage' ? 'text-[#2d4a34]' : 'text-rose-300'}`}>
-                        {cardFooter}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Print & Download Action Buttons */}
-                <div className="w-full space-y-2 pt-2">
-                  <button type="button"
-                    onClick={() => { setShowCardStudio(false); printPostalCard(); }}
-                    className="w-full bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg active:scale-95">
-                    <Printer className="w-4 h-4" />
-                    پرینت مستقیم کارت (Print)
-                  </button>
-
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    <button type="button"
-                      onClick={() => { downloadPostalCard(); }}
-                      className="bg-white/10 hover:bg-white/20 border border-white/15 text-slate-200 text-[11px] font-bold py-2 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5">
-                      <Download className="w-3.5 h-3.5 text-emerald-400" />
-                      دانلود PNG کیفیت بالا
-                    </button>
-
-                    <button type="button"
-                      onClick={() => { downloadStandaloneQR(); }}
-                      className="bg-white/10 hover:bg-white/20 border border-white/15 text-slate-200 text-[11px] font-bold py-2 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5">
-                      <QrCode className="w-3.5 h-3.5 text-sky-400" />
-                      دانلود کد QR خام
-                    </button>
-                  </div>
-                </div>
-
-              </div>
-
-            </div>
-          </div>
-        </div>
-      )}
-
-
-      {activeLightboxIndex !== null && mediaItems[activeLightboxIndex] && (
-        <div
-          className="fixed inset-0 z-50 bg-black/95 flex flex-col"
-          onClick={() => setActiveLightboxIndex(null)}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-white/5" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => setActiveLightboxIndex(null)}
-                className="p-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-white transition-all cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-              <span className="text-sm text-white font-medium">{mediaItems[activeLightboxIndex]?.guestName}</span>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                const m = mediaItems[activeLightboxIndex];
-                handleDownload(m?.url, `${selectedEventId}-${m?.id}.${getExt(m)}`);
-              }}
-              className="p-2 bg-white/5 hover:bg-white/15 rounded-lg text-white transition-all cursor-pointer flex items-center gap-1.5 text-xs"
-            >
-              <Download className="w-4 h-4" />
-              Download
-            </button>
-          </div>
-
-          <div className="flex-1 flex items-center justify-center relative" onClick={e => e.stopPropagation()}>
-            {mediaItems.length > 1 && (
-              <button type="button"
-                onClick={() => navigateLightbox(-1)}
-                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-            )}
-            <div className="w-full h-full flex items-center justify-center p-4 max-w-[90vw] max-h-[85vh]">
-              {mediaItems[activeLightboxIndex]?.type === "video" ? (
-                <video
-                  src={mediaItems[activeLightboxIndex]?.url}
-                  className="max-w-full max-h-full rounded-xl object-contain"
-                  controls autoPlay playsInline
-                />
-              ) : (
-                <img
-                  src={mediaItems[activeLightboxIndex]?.url}
-                  alt=""
-                  className="max-w-full max-h-full rounded-xl object-contain"
-                  draggable={false}
-                />
               )}
             </div>
-            {mediaItems.length > 1 && (
-              <button type="button"
-                onClick={() => navigateLightbox(1)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all cursor-pointer border border-white/10"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            )}
-          </div>
+          </>
+        )}
 
-          <div className="flex items-center justify-between px-4 py-3 border-t border-white/5 text-[11px] text-slate-500" onClick={e => e.stopPropagation()}>
-            <span>
-              {FILM_FILTERS.find(f => f.id === mediaItems[activeLightboxIndex]?.filter)?.name || mediaItems[activeLightboxIndex]?.filter}
-            </span>
-            <span className="text-white/70 text-xs">
-              {activeLightboxIndex + 1} of {mediaItems.length}
-            </span>
-          </div>
-        </div>
-      )}
+        {/* Wedding Card Designer Modal */}
+        <WeddingCardDesigner
+          isOpen={showCardDesigner}
+          onClose={() => setShowCardDesigner(false)}
+          selectedEvent={selectedEvent}
+          qrCodeDataUrl={qrCodeDataUrl}
+          onPrint={handlePrintCard}
+          onDownload={handleDownloadCard}
+        />
 
-      {/* Custom Confirmation Modal */}
-      {confirmAction && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md" dir="rtl">
-          <div className="bg-[#2d1c24] border border-white/10 rounded-3xl p-6 max-w-sm w-full mx-4 shadow-2xl space-y-4 text-center">
-            <h3 className="text-base font-bold text-white flex items-center justify-center gap-2">
-              <Sparkles className="w-5 h-5 text-teal-400" />
-              تایید عملیات
-            </h3>
-            <p className="text-xs text-slate-300 leading-relaxed font-sans">{confirmAction.message}</p>
-            <div className="flex gap-3 justify-center pt-2 font-sans">
-              <button
-                type="button"
-                onClick={() => {
-                  confirmAction.onConfirm();
-                  setConfirmAction(null);
-                }}
-                className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold py-2 px-5 rounded-xl cursor-pointer transition-all active:scale-95"
-              >
-                بله، انجام شود
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmAction(null)}
-                className="bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs font-bold py-2 px-5 rounded-xl cursor-pointer transition-all active:scale-95"
-              >
-                خیر، انصراف
-              </button>
+        {/* Create Event Modal */}
+        {showCreateModal && (
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+            <div className="bg-slate-900 rounded-3xl border border-slate-700 w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-slide-up">
+              <div className="flex items-center justify-between p-6 border-b border-slate-700">
+                <h2 className="text-xl font-bold text-white font-vazir">ایجاد رویداد جدید</h2>
+                <button
+                  onClick={() => setShowCreateModal(false)}
+                  className="p-2 rounded-xl bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleCreateEvent} className="p-6 space-y-5">
+                <div>
+                  <label className="block text-sm text-slate-400 font-vazir mb-1">کد رویداد *</label>
+                  <input
+                    type="text"
+                    value={formId}
+                    onChange={(e) => setFormId(e.target.value.toLowerCase().replace(/[^a-z0-9\-]/g, ""))}
+                    className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-mono"
+                    placeholder="my-wedding-2024"
+                    required
+                    maxLength={50}
+                  />
+                  <p className="text-xs text-slate-500 font-vazir mt-1">فقط حروف انگلیسی، اعداد و خط تیره (برای لینک کوتاه)</p>
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 font-vazir mb-1">نام رویداد *</label>
+                  <input
+                    type="text"
+                    value={formName}
+                    onChange={(e) => setFormName(e.target.value)}
+                    className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                    placeholder="مراسم عروسی فاطمه و حمید"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 font-vazir mb-1">نام میزبان</label>
+                  <input
+                    type="text"
+                    value={formHost}
+                    onChange={(e) => setFormHost(e.target.value)}
+                    className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                    placeholder="فاطمه و حمید"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 font-vazir mb-1">توضیحات</label>
+                  <textarea
+                    value={formDesc}
+                    onChange={(e) => setFormDesc(e.target.value)}
+                    rows={3}
+                    className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir resize-none"
+                    placeholder="توضیحات برای مهمانان..."
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-slate-400 font-vazir mb-1">سبک نمایش</label>
+                    <select
+                      value={formReveal}
+                      onChange={(e) => setFormReveal(e.target.value as "instant" | "delay")}
+                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                    >
+                      <option value="instant">فوری</option>
+                      <option value="delay">با تاخیر</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 font-vazir mb-1">مدت ماکس ویدیو (ثانیه)</label>
+                    <input
+                      type="number"
+                      value={formMaxDuration}
+                      onChange={(e) => setFormMaxDuration(parseInt(e.target.value) || 30)}
+                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                      min="5"
+                      max="300"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-slate-400 font-vazir mb-1">حد عکس (۰ = نامحدود)</label>
+                    <input
+                      type="number"
+                      value={formImgLimit}
+                      onChange={(e) => setFormImgLimit(parseInt(e.target.value) || 0)}
+                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                      min="0"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-slate-400 font-vazir mb-1">حد ویدیو (۰ = نامحدود)</label>
+                    <input
+                      type="number"
+                      value={formVidLimit}
+                      onChange={(e) => setFormVidLimit(parseInt(e.target.value) || 0)}
+                      className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-vazir"
+                      min="0"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm text-slate-400 font-vazir mb-1">دایرکتوری ذخیره‌سازی</label>
+                  <input
+                    type="text"
+                    value={formSaveDir}
+                    onChange={(e) => setFormSaveDir(e.target.value)}
+                    className="w-full bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-500/50 focus:border-transparent font-mono text-sm"
+                    placeholder="D:\\Wedding"
+                  />
+                </div>
+                <div className="flex gap-3 pt-4 border-t border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setShowCreateModal(false)}
+                    className="flex-1 px-6 py-3 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white rounded-xl transition-all font-vazir font-semibold border border-slate-700/50"
+                  >
+                    انصراف
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-6 py-3 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white rounded-xl transition-all font-vazir font-semibold shadow-lg"
+                  >
+                    ایجاد رویداد
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
+        {/* Lightbox */}
+        {activeLightboxIndex !== null && mediaItems[activeLightboxIndex] && (
+          <MediaLightbox
+            media={mediaItems[activeLightboxIndex]}
+            onClose={() => setActiveLightboxIndex(null)}
+            onNavigate={navigateLightbox}
+            onDownload={handleDownload}
+            onLike={handleLikeMedia}
+            isLiked={likedMedia.has(mediaItems[activeLightboxIndex].id)}
+            index={activeLightboxIndex}
+            total={mediaItems.length}
+          />
+        )}
+      </main>
     </div>
   );
 }
+
+// ─── Helper Components ─────────────────────────────────────────────
+
+const MediaCard = React.memo(function MediaCard({ 
+  media, selected, selectMode, onToggleSelect, onDelete, onLike, isLiked, onOpenLightbox, downloadMedia 
+}: any) {
+  const isVideo = media.type === 'video';
+  const thumbUrl = media.thumbnailUrl || media.url;
+  
+  return (
+    <div className={`relative group bg-slate-900/50 rounded-2xl overflow-hidden border transition-all cursor-pointer ${selectMode ? 'select-none' : ''} ${selected ? 'ring-2 ring-amber-400 scale-[0.98]' : 'border-slate-800/50 hover:border-amber-500/30'}`}>
+      <div className="aspect-square relative overflow-hidden">
+        {isVideo ? (
+          <video
+            src={thumbUrl}
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+            muted
+            preload="metadata"
+          />
+        ) : (
+          <img
+            src={thumbUrl}
+            alt={media.guestName}
+            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+            loading="lazy"
+          />
+        )}
+        {isVideo && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+            <Play className="w-12 h-12 text-white/90 drop-shadow-lg" />
+          </div>
+        )}
+        {selectMode && (
+          <div className="absolute top-2 right-2 z-10">
+            <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+              selected ? 'bg-amber-400 border-amber-400' : 'bg-black/50 border-white/30'
+            }`}>
+              {selected && <Check className="w-4 h-4 text-white" />}
+            </div>
+          </div>
+        )}
+        <div className="absolute bottom-2 left-2 right-2 flex justify-between opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={(e) => { e.stopPropagation(); onLike(media.id); }}
+            className={`p-2 rounded-xl backdrop-blur-sm transition-all ${isLiked ? 'bg-rose-500 text-white' : 'bg-black/50 text-white/80 hover:bg-white/10'}`}
+            aria-label={isLiked ? "لایک شده" : "لایک"}
+          >
+            <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onOpenLightbox(); }}
+            className="p-2 rounded-xl bg-black/50 text-white/80 hover:bg-white/10 backdrop-blur-sm transition-all"
+            aria-label="مشاهده تمام صفحه"
+          >
+            <Eye className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
+      <div className="p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0">
+            <p className="text-white font-medium font-vazir truncate">{media.guestName || "مهمان ناشناس"}</p>
+            <p className="text-xs text-slate-400 font-vazir truncate">{new Date(media.timestamp).toLocaleString('fa-IR')}</p>
+          </div>
+          {!selectMode && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onDelete(media.id); }}
+              className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 transition-all opacity-0 group-hover:opacity-100"
+              aria-label="حذف"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const MediaLightbox = ({ media, onClose, onNavigate, onDownload, onLike, isLiked, index, total }: any) => {
+  const isVideo = media.type === 'video';
+  
+  return (
+    <div className="fixed inset-0 bg-black/95 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in" onClick={onClose}>
+      <div className="relative w-full h-full max-w-6xl max-h-[90vh] p-2 md:p-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="p-2 rounded-xl bg-slate-900/50 hover:bg-slate-800/50 text-white/70 hover:text-white transition-all">
+              <X className="w-6 h-6" />
+            </button>
+            <span className="text-white font-vazir text-sm">{index + 1} / {total}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => { e.stopPropagation(); onLike(media.id); }}
+              className={`p-2 rounded-xl bg-slate-900/50 hover:bg-slate-800/50 transition-all ${isLiked ? 'text-rose-400' : 'text-white/70 hover:text-white'}`}
+            >
+              <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} />
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onDownload(media.url, `${media.guestName || 'media'}.${isVideo ? 'mp4' : 'jpg'}`); }}
+              className="p-2 rounded-xl bg-slate-900/50 hover:bg-slate-800/50 text-white/70 hover:text-white transition-all"
+            >
+              <Download className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+        
+        <div className="relative aspect-video max-h-[75vh] flex items-center justify-center">
+          {isVideo ? (
+            <video
+              src={media.url}
+              controls
+              className="max-w-full max-h-full rounded-xl shadow-2xl"
+              autoPlay
+            />
+          ) : (
+            <img
+              src={media.url}
+              alt={media.guestName}
+              className="max-w-full max-h-full rounded-xl shadow-2xl"
+            />
+          )}
+        </div>
+        
+        <div className="mt-4 p-4 bg-slate-900/50 rounded-2xl border border-slate-800/50">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-amber-500 to-rose-500 flex items-center justify-center">
+              <span className="text-white font-bold font-vazir">{media.guestName?.[0] || "?"}</span>
+            </div>
+            <div>
+              <p className="text-white font-medium font-vazir">{media.guestName || "مهمان ناشناس"}</p>
+              <p className="text-slate-400 text-sm font-vazir">{new Date(media.timestamp).toLocaleString('fa-IR')}</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 flex gap-4">
+          <button
+            onClick={(e) => { e.stopPropagation(); onNavigate(-1); }}
+            disabled={index === 0}
+            className="p-3 rounded-xl bg-slate-900/50 hover:bg-slate-800/50 text-white/70 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <ChevronRight className="w-6 h-6" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onNavigate(1); }}
+            disabled={index === total - 1}
+            className="p-3 rounded-xl bg-slate-900/50 hover:bg-slate-800/50 text-white/70 hover:text-white transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StatCard = ({ title, value, icon: Icon, color }: any) => {
+  const colors = {
+    blue: "from-blue-500 to-blue-600",
+    green: "from-emerald-500 to-emerald-600",
+    amber: "from-amber-500 to-amber-600",
+    purple: "from-violet-500 to-violet-600",
+  };
+  return (
+    <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-slate-400 text-sm font-vazir">{title}</p>
+          <p className="text-3xl font-bold text-white font-vazir mt-1">{value}</p>
+        </div>
+        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${colors[color]} flex items-center justify-center`}>
+          <Icon className="w-6 h-6 text-white" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ChartCard = ({ title, children }: any) => (
+  <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6">
+    <h3 className="text-lg font-semibold text-white font-vazir mb-4">{title}</h3>
+    <div className="h-72">{children}</div>
+  </div>
+);
+
+const FaceProfileCard = ({ 
+  profile, editing, editName, onEditNameChange, onEditClick, onSaveClick, onCancelClick, onDeleteClick, onMergeClick, onMergeInto, isSelectedForMerge, canMerge 
+}: any) => {
+  const faceCount = profile.faceCount || 0;
+  const displayName = profile.displayName || `شخص ${profile.personId.slice(0,6)}`;
+  
+  const avatarSrc = profile.representativeImage || profile.avatarUrl;
+  
+  return (
+    <div className={`bg-slate-900/50 rounded-2xl border overflow-hidden transition-all ${isSelectedForMerge ? 'ring-2 ring-amber-400 bg-amber-500/10' : 'border-slate-800/50 hover:border-amber-500/30'}`}>
+      <div className="aspect-square relative overflow-hidden bg-slate-800 flex items-center justify-center">
+        {avatarSrc ? (
+          <img
+            src={avatarSrc}
+            alt={displayName}
+            className="w-full h-full object-cover"
+            onError={(e) => {
+              (e.target as HTMLElement).style.display = 'none';
+            }}
+          />
+        ) : (
+          <User className="w-12 h-12 text-slate-600" />
+        )}
+        <div className="absolute top-2 right-2 flex gap-1">
+          {!editing && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEditClick(); }}
+              className="p-1.5 rounded-lg bg-black/50 hover:bg-black/70 text-white/80 hover:text-white transition-all"
+              title="ویرایش نام"
+            >
+              <Edit className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            onClick={(e) => { e.stopPropagation(); onDeleteClick(); }}
+            className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 transition-all"
+            title="حذف پروفایل"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+        {canMerge && !isSelectedForMerge && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onMergeInto(); }}
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 bg-amber-500 hover:bg-amber-400 text-white text-xs font-vazir rounded-full transition-all"
+          >
+            ادغام در انتخاب شده
+          </button>
+        )}
+      </div>
+      <div className="p-4">
+        {editing ? (
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={editName}
+              onChange={(e) => onEditNameChange?.(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onSaveClick()}
+              onBlur={onSaveClick}
+              autoFocus
+              className="flex-1 bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-vazir focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+            />
+            <button onClick={onSaveClick} className="p-2 rounded-lg bg-green-500/20 hover:bg-green-500/30 text-green-300 transition-all" title="ذخیره"><Check className="w-4 h-4" /></button>
+            <button onClick={onCancelClick} className="p-2 rounded-lg bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 transition-all" title="انصراف"><X className="w-4 h-4" /></button>
+          </div>
+        ) : (
+          <>
+            <h4 className="text-white font-medium font-vazir truncate mb-1">{displayName}</h4>
+            <div className="flex items-center justify-between text-xs text-slate-400 font-vazir">
+              <span>{faceCount} چهره</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); onMergeClick(); }}
+                className={`px-2 py-1 rounded-full text-xs transition-all ${isSelectedForMerge ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800/50 text-slate-400 hover:text-white'}`}
+              >
+                {isSelectedForMerge ? '✓ انتخاب شده' : 'ادغام'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};

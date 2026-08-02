@@ -382,34 +382,43 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                   <span className="text-[10px]">همه افراد</span>
                 </button>
 
-                {faceProfiles.map((p) => {
-                  const isSelected = selectedPersonId === p.personId;
-                  return (
-                    <motion.button
-                      key={p.personId}
-                      type="button"
-                      whileTap={{ scale: 0.94 }}
-                      onClick={() => setSelectedPersonId(isSelected ? null : p.personId)}
-                      className={`flex flex-col items-center gap-1 shrink-0 p-1.5 rounded-xl border transition-all cursor-pointer relative ${
-                        isSelected
-                          ? "bg-teal-500/25 border-teal-400 shadow-md ring-2 ring-teal-400/40"
-                          : "bg-white/5 border-white/10 hover:border-white/25"
-                      }`}
-                    >
-                      {/* ── face avatar — no photo count badge ── */}
-                      <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/20 bg-slate-900 shadow-md">
-                        {p.avatarUrl ? (
-                          <img src={p.avatarUrl} alt={p.displayName} className="w-full h-full object-cover" />
-                        ) : (
-                          <User className="w-6 h-6 text-slate-400 m-auto mt-3" />
-                        )}
-                      </div>
-                      <span className="text-[10px] font-semibold text-slate-200 truncate max-w-[65px]">
-                        {p.displayName}
-                      </span>
-                    </motion.button>
-                  );
-                })}
+                {faceProfiles
+                  .filter(p => p.avatarUrl && (p.photoCount === undefined || p.photoCount > 0))
+                  .map((p) => {
+                    const isSelected = selectedPersonId === p.personId;
+                    return (
+                      <motion.button
+                        key={p.personId}
+                        type="button"
+                        whileTap={{ scale: 0.94 }}
+                        onClick={() => setSelectedPersonId(isSelected ? null : p.personId)}
+                        className={`flex flex-col items-center gap-1 shrink-0 p-1.5 rounded-xl border transition-all cursor-pointer relative ${
+                          isSelected
+                            ? "bg-teal-500/25 border-teal-400 shadow-md ring-2 ring-teal-400/40"
+                            : "bg-white/5 border-white/10 hover:border-white/25"
+                        }`}
+                      >
+                        {/* ── face avatar — no photo count badge ── */}
+                        <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/20 bg-slate-900 shadow-md flex items-center justify-center">
+                          {p.avatarUrl ? (
+                            <img 
+                              src={p.avatarUrl} 
+                              alt={p.displayName} 
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <User className="w-6 h-6 text-slate-400" />
+                          )}
+                        </div>
+                        <span className="text-[10px] font-semibold text-slate-200 truncate max-w-[65px]">
+                          {p.displayName}
+                        </span>
+                      </motion.button>
+                    );
+                  })}
               </div>
             </motion.div>
           )}

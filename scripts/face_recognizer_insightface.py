@@ -135,8 +135,8 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_na
         person_embeddings = {}
         print("No existing index found. Starting fresh.")
     
-    # Find all image files (excluding dynamic webp thumbnails)
-    image_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.webp', '.JPG', '.JPEG', '.PNG', '.HEIC', '.WEBP'}
+    # Find all original image files (excluding webp thumbnails, face crops, and thumbnail files)
+    image_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.JPG', '.JPEG', '.PNG', '.HEIC'}
     photo_files = []
     seen_paths = set()
     
@@ -151,6 +151,11 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_na
         if inp_path.exists():
             for ext in image_extensions:
                 for file_p in inp_path.rglob(f'*{ext}'):
+                    filename_lower = file_p.name.lower()
+                    path_str_lower = str(file_p).lower()
+                    # Skip webp, thumbnails, and face crop directory files
+                    if filename_lower.endswith('.webp') or 'thumb' in filename_lower or 'face_index' in path_str_lower or 'face-crops' in path_str_lower or '\\faces\\' in path_str_lower or '/faces/' in path_str_lower:
+                        continue
                     if str(file_p) not in seen_paths:
                         if allowed_files is not None and str(file_p) not in allowed_files:
                             continue
@@ -255,15 +260,30 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_na
                     person_embeddings[matched_person_id] = embedding
                     print(f"    Face {face_idx+1}: NEW Person {matched_person_id}")
                 
-                # Save aligned face crop as thumbnail
-                # InsightFace provides aligned face in face.aligned_face (112x112)
+                # Save high quality face crop as thumbnail (with 25% margin padding)
                 thumb_name = f"face_{photo_path.stem}_{face_idx+1}.jpg"
                 thumb_path = faces_dir / thumb_name
-                if not thumb_path.exists() and face.aligned_face is not None:
-                    # Convert BGR to RGB and save
-                    aligned_rgb = face.aligned_face[:, :, ::-1]
-                    thumb = Image.fromarray(aligned_rgb).resize((150, 150), Image.LANCZOS)
-                    thumb.save(thumb_path, 'JPEG', quality=90)
+                if not thumb_path.exists():
+                    try:
+                        box_w = x2 - x1
+                        box_h = y2 - y1
+                        pad_x = int(box_w * 0.25)
+                        pad_y = int(box_h * 0.25)
+
+                        crop_x1 = max(0, x1 - pad_x)
+                        crop_y1 = max(0, y1 - pad_y)
+                        crop_x2 = min(orig_w, x2 + pad_x)
+                        crop_y2 = min(orig_h, y2 + pad_y)
+
+                        crop_img = img.crop((crop_x1, crop_y1, crop_x2, crop_y2))
+                        thumb = crop_img.resize((150, 150), Image.LANCZOS)
+                        thumb.save(thumb_path, 'JPEG', quality=90)
+                    except Exception as e:
+                        print(f"    Failed to save thumbnail: {e}")
+
+                if not thumb_path.exists():
+                    print(f"    Face {face_idx+1}: Thumbnail missing, skipping")
+                    continue
                 
                 # Create face record
                 face_record = {

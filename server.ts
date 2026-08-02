@@ -203,15 +203,19 @@ const requireAdmin = (req: any, res: any, next: any) => {
 
 app.use("/uploads", express.static(uploadsBaseDir, { maxAge: "30d" }));
 
-// Dynamic /face-crops route: resolves to event saveDirectory\Face_Index\faces at request time
-// This ensures hot-swapped SSD paths (D:\Wedding -> E:\Wedding) are always reflected.
-app.use("/face-crops", async (req: any, res: any, next: any) => {
+// Dynamic /face-crops route: serves face crops from event saveDirectory\Face_Index\faces or fallback
+app.get("/face-crops/:filename", async (req: any, res: any) => {
   const saveDir = await getPrimarySaveDirectory();
   const cropsDir = getFaceCropsDir(saveDir);
-  if (!fs.existsSync(cropsDir)) {
-    fs.mkdirSync(cropsDir, { recursive: true });
+  const filePath = path.join(cropsDir, req.params.filename);
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
   }
-  express.static(cropsDir, { maxAge: "7d" })(req, res, next);
+  const fallbackPath = path.join(process.cwd(), "face-index", "faces", req.params.filename);
+  if (fs.existsSync(fallbackPath)) {
+    return res.sendFile(fallbackPath);
+  }
+  res.status(404).send("Face thumbnail not found");
 });
 
 // Background Face Indexing Runner (InsightFace - CPU optimized)
@@ -247,8 +251,8 @@ async function triggerFaceIndexer() {
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
     const formattedDirs = inputDirs.map(d => `"${d}"`).join(" ");
-    // Using InsightFace buffalo_l model with 0.6 threshold (cosine distance) for better accuracy
-    const cmd = `${pythonCmd} "${scriptPath}" --input-dir ${formattedDirs} --output-dir "${outputDir}" --tolerance 0.6 --max-size 800`;
+    // Using InsightFace buffalo_l model with 0.2 threshold for strict face grouping
+    const cmd = `${pythonCmd} "${scriptPath}" --input-dir ${formattedDirs} --output-dir "${outputDir}" --tolerance 0.2 --max-size 800`;
     logger.info(`Launching InsightFace indexer: output=${outputDir}`);
 
     exec(cmd, { 
@@ -846,14 +850,24 @@ app.get("/api/events/:id/face-profiles", async (req: any, res: any, next: any) =
     }
     const content = fs.readFileSync(jsonPath, "utf8");
     const data = JSON.parse(content);
-
-    const profiles = (data.persons || []).map((p: any) => ({
-      personId: p.personId,
-      displayName: p.displayName || p.personId,
-      photoCount: p.photoCount,
-      avatarUrl: p.sampleThumbnailName ? `/face-crops/${p.sampleThumbnailName}` : "",
-      photoNames: p.photos || []
-    }));
+    const cropsDir = getFaceCropsDir(saveDir);
+    const profiles = (data.persons || [])
+      .map((p: any) => {
+        const thumbName = p.sampleThumbnailName || "";
+        const thumbPath = thumbName ? path.join(cropsDir, thumbName) : "";
+        const hasThumb = thumbName && fs.existsSync(thumbPath);
+        const url = hasThumb ? `/face-crops/${thumbName}` : "";
+        return {
+          personId: p.personId,
+          displayName: p.displayName || p.personId,
+          photoCount: p.photoCount || (p.photos ? p.photos.length : 0),
+          faceCount: p.photoCount || (p.photos ? p.photos.length : 0),
+          avatarUrl: url,
+          representativeImage: url,
+          photoNames: p.photos || []
+        };
+      })
+      .filter((p: any) => p.avatarUrl !== "" && p.photoCount > 0);
 
     res.json({
       profiles,
@@ -870,6 +884,7 @@ app.post("/api/events/:id/trigger-face-index", async (req: any, res: any) => {
 
 app.post("/api/events/:id/sync-faces", async (req: any, res: any, next: any) => {
   const { id } = req.params;
+  const tolerance = parseFloat(req.query.tolerance as string) || 0.2;
   
   if (isIndexingFaces) {
     return res.status(409).json({ error: "پردازش چهره از قبل در حال اجراست." });
