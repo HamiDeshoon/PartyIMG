@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
+import os from "os";
 import https from "https";
 import http from "http";
 import { createServer as createViteServer } from "vite";
@@ -246,9 +247,17 @@ async function triggerFaceIndexer() {
     const outputDir = getFaceIndexDir(primarySaveDir);
     if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
+    // Write manifest of active media
+    const sqlite = await db.getDb();
+    const mediaList = await sqlite.all('SELECT systemSavePath FROM media WHERE type = "photo" AND systemSavePath IS NOT NULL');
+    const manifestLines = mediaList.map(m => m.systemSavePath).filter(Boolean);
+    const manifestPath = path.join(os.tmpdir(), `partyimg_manifest_${Date.now()}.txt`);
+    fs.writeFileSync(manifestPath, manifestLines.join('\n'));
+
     const formattedDirs = inputDirs.map(d => `"${d}"`).join(" ");
+    const selfiesDir = path.join(outputDir, "guest_selfies");
     // Using InsightFace buffalo_l model with 0.6 threshold (cosine distance) for better accuracy
-    const cmd = `${pythonCmd} "${scriptPath}" --input-dir ${formattedDirs} --output-dir "${outputDir}" --tolerance 0.6 --max-size 800`;
+    const cmd = `${pythonCmd} "${scriptPath}" --input-dir ${formattedDirs} --output-dir "${outputDir}" --tolerance 0.6 --max-size 800 --manifest "${manifestPath}" --guest-selfies-dir "${selfiesDir}"`;
     logger.info(`Launching InsightFace indexer: output=${outputDir}`);
 
     exec(cmd, { 
@@ -263,7 +272,10 @@ async function triggerFaceIndexer() {
         logger.info(`Background face indexing completed successfully.`);
         const lines = stdout?.trim().split('\n').slice(-5).join('\n');
         logger.info(`Face indexer summary:\n${lines}`);
+        // Notify all connected clients to refresh face profiles
+        broadcastEvent('face-index-complete', { source: 'background' });
       }
+      if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
     });
   } catch (err) {
     isIndexingFaces = false;
@@ -388,30 +400,14 @@ const uploadParams = multer({
   storage,
   limits: { fileSize: 2048 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    const mimetype = (file.mimetype || '').toLowerCase();
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    const allowedExts = [
-      '.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif', '.gif', '.avif', '.bmp',
-      '.mp4', '.mov', '.webm', '.mkv', '.avi', '.3gp', '.3gpp', '.m4v'
-    ];
-
-    if (mimetype.startsWith('image/') || mimetype.startsWith('video/') || allowedExts.includes(ext)) {
+    const allowed = ['image/jpeg', 'image/png', 'image/heic', 'video/mp4', 'video/quicktime'];
+    if (allowed.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error(`نوع فایل (${file.originalname || 'ناشناس'}) پشتیبانی نمی‌شود. تنها فایل‌های تصویر و ویدیو مجاز هستند.`));
+      cb(new Error('Invalid file type. Only JPG, PNG, HEIC, MP4, MOV allowed.'));
     }
   }
 });
-
-const handleStreamingUploadMiddleware = (req: any, res: any, next: any) => {
-  uploadParams.single('fileData')(req, res, (err: any) => {
-    if (err) {
-      logger.error("Multer upload error: " + err.message);
-      return res.status(400).json({ error: err.message || "خطا در آپلود فایل." });
-    }
-    next();
-  });
-};
 
 // --- API ROUTES ---
 
@@ -586,7 +582,7 @@ app.get("/api/events/:id/media", async (req: any, res: any, next: any) => {
 // Multipart streaming upload
 import sharp from "sharp";
 
-app.post("/api/events/:id/upload/streaming", handleStreamingUploadMiddleware, async (req, res, next) => {
+app.post("/api/events/:id/upload/streaming", uploadParams.single('fileData'), async (req, res, next) => {
   try {
     const eventId = req.params.id;
     const event = await db.getEventById(eventId);
@@ -595,9 +591,7 @@ app.post("/api/events/:id/upload/streaming", handleStreamingUploadMiddleware, as
     if (!req.file) return res.status(400).json({ error: "No valid file uploaded." });
 
     const guestName = req.body.guestName || "Anonymous";
-    const ext = path.extname(req.file.originalname || req.file.filename || '').toLowerCase();
-    const isVideoExt = ['.mp4', '.mov', '.webm', '.mkv', '.avi', '.3gp', '.3gpp', '.m4v'].includes(ext);
-    const type = (req.file.mimetype.startsWith('video') || isVideoExt) ? 'video' : 'photo';
+    const type = req.file.mimetype.startsWith('video') ? 'video' : 'photo';
     const filter = req.body.filter || "none";
     const duration = parseInt(req.body.duration) || 0;
 
@@ -635,7 +629,7 @@ app.post("/api/events/:id/upload/streaming", handleStreamingUploadMiddleware, as
         const ffmpeg = (await import("fluent-ffmpeg")).default;
         await new Promise<void>((resolve, reject) => {
           ffmpeg(req.file.path)
-            .outputOptions('-qscale:v', '2')
+            .outputOptions('-qscale:v', '2') // higher quality thumbnail
             .on('end', () => resolve())
             .on('error', (err: any) => reject(err))
             .screenshots({
@@ -656,31 +650,27 @@ app.post("/api/events/:id/upload/streaming", handleStreamingUploadMiddleware, as
         }
       }
     } catch (err) {
-      logger.warn("Failed to generate thumbnail: " + err);
+      logger.error("Failed to generate thumbnail: " + err);
     }
 
-    // If uploading a video, re-encode (safely wrapped)
+    // If uploading a video, re-encode to retain quality
     if (type === 'video' && req.file) {
-      try {
-        const ffmpeg = (await import('fluent-ffmpeg')).default;
-        const processedPath = req.file.path + '_hq.mp4';
-        await new Promise<void>((resolve, reject) => {
-          ffmpeg(req.file.path)
-            .outputOptions('-c:v libx264', '-crf', '22', '-preset', 'fast')
-            .save(processedPath)
-            .on('end', () => resolve())
-            .on('error', (err: any) => reject(err));
-        });
-        if (fs.existsSync(processedPath)) {
-          fs.unlinkSync(req.file.path);
-          req.file.path = processedPath;
-          req.file.originalname = path.basename(processedPath);
-        }
-      } catch (vErr) {
-        logger.warn("FFmpeg re-encode skipped/failed, keeping original video: " + vErr);
+      const ffmpeg = (await import('fluent-ffmpeg')).default;
+      const processedPath = req.file.path + '_hq.mp4';
+      await new Promise<void>((resolve, reject) => {
+        ffmpeg(req.file.path)
+          .outputOptions('-c:v libx264', '-crf', '18', '-preset', 'slow')
+          .save(processedPath)
+          .on('end', () => resolve())
+          .on('error', (err: any) => reject(err));
+      });
+      // Replace original file with processed version
+      if (fs.existsSync(processedPath)) {
+        fs.unlinkSync(req.file.path);
+        req.file.path = processedPath;
+        req.file.originalname = path.basename(processedPath);
       }
     }
-
     const { url: publicUrl, systemSavePath } = await storageProvider.saveFile(
         req.file, eventId, type, req.file.originalname, undefined, event.saveDirectory || undefined
     );
@@ -717,9 +707,8 @@ app.post("/api/events/:id/upload/streaming", handleStreamingUploadMiddleware, as
     // Trigger face recognition indexing in background 3s after upload
     setTimeout(triggerFaceIndexer, 3000);
   } catch (err: any) {
-    logger.error("Upload route error: " + (err?.stack || err));
     if (err.message && err.message.includes('Invalid file type')) return res.status(400).json({ error: err.message });
-    return res.status(400).json({ error: err.message || "خطا در بارگذاری و پردازش فایل." });
+    next(err);
   }
 });
 
@@ -868,8 +857,12 @@ app.post("/api/events/:id/trigger-face-index", async (req: any, res: any) => {
   res.json({ success: true, message: "Face indexing triggered in background." });
 });
 
-app.post("/api/events/:id/sync-faces", async (req: any, res: any, next: any) => {
+app.post("/api/events/:id/sync-faces", requireAdmin, async (req: any, res: any, next: any) => {
   const { id } = req.params;
+  
+  // Extract and validate tolerance from query param (sent by AdminPanel slider)
+  const rawTolerance = parseFloat(req.query.tolerance as string);
+  const tolerance = isNaN(rawTolerance) ? 0.6 : Math.min(0.85, Math.max(0.25, rawTolerance));
   
   if (isIndexingFaces) {
     return res.status(409).json({ error: "پردازش چهره از قبل در حال اجراست." });
@@ -897,8 +890,15 @@ app.post("/api/events/:id/sync-faces", async (req: any, res: any, next: any) => 
       fs.mkdirSync(outputDir, { recursive: true });
     }
 
+    // Write manifest of active media
+    const mediaList = await sqlite.all('SELECT systemSavePath FROM media WHERE type = "photo" AND systemSavePath IS NOT NULL');
+    const manifestLines = mediaList.map(m => m.systemSavePath).filter(Boolean);
+    const manifestPath = path.join(os.tmpdir(), `partyimg_manifest_${Date.now()}.txt`);
+    fs.writeFileSync(manifestPath, manifestLines.join('\n'));
+
     const formattedDirs = inputDirs.map(d => `"${d}"`).join(" ");
-    const cmd = `${pythonCmd} "${scriptPath}" --input-dir ${formattedDirs} --output-dir "${outputDir}" --tolerance ${tolerance} --max-size 800`;
+    const selfiesDir = path.join(outputDir, "guest_selfies");
+    const cmd = `${pythonCmd} "${scriptPath}" --input-dir ${formattedDirs} --output-dir "${outputDir}" --tolerance ${tolerance} --max-size 800 --manifest "${manifestPath}" --guest-selfies-dir "${selfiesDir}"`;
     
     logger.info(`Running InsightFace indexer synchronously: ${cmd}`);
 
@@ -928,10 +928,43 @@ app.post("/api/events/:id/sync-faces", async (req: any, res: any, next: any) => 
         logger.warn(`Could not parse face index summary: ${e}`);
       }
 
+      // Notify all connected clients to refresh face profiles
+      broadcastEvent('face-index-complete', { source: 'manual', processedCount });
       res.json({ success: true, processedCount });
+      
+      if (fs.existsSync(manifestPath)) fs.unlinkSync(manifestPath);
     });
   } catch (err: any) {
     isIndexingFaces = false;
+    next(err);
+  }
+});
+
+const uploadSelfie = multer({ dest: path.join(os.tmpdir(), "partyimg_selfies") });
+app.post("/api/events/:id/guest-selfie", uploadSelfie.single("selfie"), async (req: any, res: any, next: any) => {
+  try {
+    const { id } = req.params;
+    const { guestName } = req.body;
+    
+    if (!req.file || !guestName) {
+      return res.status(400).json({ error: "Missing selfie file or guest name" });
+    }
+
+    const saveDir = await getPrimarySaveDirectory();
+    const outputDir = getFaceIndexDir(saveDir);
+    const selfiesDir = path.join(outputDir, "guest_selfies");
+    if (!fs.existsSync(selfiesDir)) fs.mkdirSync(selfiesDir, { recursive: true });
+
+    // Sanitize guest name for filesystem
+    const safeName = guestName.replace(/[^a-z0-9\u0600-\u06FF\s-]/gi, '').trim();
+    if (!safeName) return res.status(400).json({ error: "Invalid guest name" });
+
+    const destPath = path.join(selfiesDir, `${safeName}.jpg`);
+    fs.renameSync(req.file.path, destPath);
+
+    res.json({ success: true, message: "Selfie saved successfully" });
+  } catch (err) {
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     next(err);
   }
 });

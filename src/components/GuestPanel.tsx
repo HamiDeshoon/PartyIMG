@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
-  Camera, Video, User, Sparkles, Heart, Image,
+  Camera, Video, User, Sparkles, Heart, Image, X,
   Lock, Unlock, Check, AlertCircle, Loader, ArrowLeft, Trash2, WifiOff,
-  ChevronLeft, ChevronRight, Download
+  ChevronLeft, ChevronRight, Download, LogOut
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FILM_FILTERS, FilterPreset } from "../types";
@@ -158,11 +158,12 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     setVideoCount(vCount);
   };
 
-  const handleRegisterName = (e?: React.FormEvent) => {
+  const handleRegisterName = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const finalName = guestName.trim() || `مهمان ناشناس ${Math.floor(100 + Math.random() * 900)}`;
     setGuestName(finalName);
     localStorage.setItem(`guest_name_${eventId}`, finalName);
+    
     setIsRegistered(true);
     calculateGuestLimits(finalName, mediaItems);
   };
@@ -609,9 +610,21 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
         </div>
         {isRegistered && (
           <div className="flex items-center gap-2">
-            <span className="text-[10px] text-rose-300 bg-rose-500/15 border border-rose-500/25 px-2.5 py-1 rounded-full font-sans">
+            <span className="text-[11px] font-semibold text-rose-300 bg-rose-500/15 border border-rose-500/25 px-3 py-1 rounded-full font-sans flex items-center gap-1.5">
+              <User className="w-3 h-3 text-rose-400" />
               {guestName}
             </span>
+            <button
+              type="button"
+              id="guest_logout_btn"
+              onClick={handleClearName}
+              title="خروج و تغییر نام مهمان"
+              aria-label="خروج حساب کاربری مهمان"
+              className="flex items-center gap-1 text-xs text-rose-300 hover:text-white bg-rose-500/20 hover:bg-rose-500/35 border border-rose-500/30 px-2.5 py-1 rounded-xl transition-all cursor-pointer font-medium active:scale-95"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>خروج</span>
+            </button>
           </div>
         )}
       </header>

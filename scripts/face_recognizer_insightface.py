@@ -93,7 +93,7 @@ def is_duplicate_face(face_embedding, existing_embeddings, threshold=DUPLICATE_T
 # ============================================================
 # Main Processing Pipeline
 # ============================================================
-def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_name='buffalo_l'):
+def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_name='buffalo_l', manifest=None, guest_selfies_dir=None):
     """
     Main face indexing pipeline using InsightFace.
     
@@ -103,6 +103,8 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_na
         tolerance: Recognition threshold (cosine similarity, lower = stricter)
         max_size: Max image dimension for processing
         model_name: InsightFace model pack ('buffalo_l' or 'buffalo_sc')
+        manifest: Optional path to a text file containing paths of allowed image files to process
+        guest_selfies_dir: Optional path to a directory containing guest selfies (filename = guestname)
     """
     app = get_app(model_name=model_name)
     
@@ -134,16 +136,24 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_na
         print("No existing index found. Starting fresh.")
     
     # Find all image files (excluding dynamic webp thumbnails)
-    image_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.JPG', '.JPEG', '.PNG', '.HEIC'}
+    image_extensions = {'.jpg', '.jpeg', '.png', '.heic', '.webp', '.JPG', '.JPEG', '.PNG', '.HEIC', '.WEBP'}
     photo_files = []
     seen_paths = set()
     
+    allowed_files = None
+    if manifest and Path(manifest).exists():
+        with open(manifest, 'r', encoding='utf-8') as f:
+            allowed_files = set(line.strip() for line in f if line.strip())
+            print(f"Loaded manifest with {len(allowed_files)} allowed files.")
+            
     for inp_dir in input_dirs:
         inp_path = Path(inp_dir)
         if inp_path.exists():
             for ext in image_extensions:
                 for file_p in inp_path.rglob(f'*{ext}'):
                     if str(file_p) not in seen_paths:
+                        if allowed_files is not None and str(file_p) not in allowed_files:
+                            continue
                         seen_paths.add(str(file_p))
                         photo_files.append(file_p)
     
@@ -278,7 +288,6 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_na
             
         except Exception as e:
             print(f"Error: {e}")
-            traceback.print_exc()
             processed_photos.add(photo_path.name)
             continue
     
@@ -290,6 +299,29 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_na
             person_faces[pid] = []
         person_faces[pid].append(face)
     
+    # Guest Selfie auto-linking
+    guest_selfies = {}
+    if guest_selfies_dir:
+        gs_dir = Path(guest_selfies_dir)
+        if gs_dir.exists():
+            print(f"Scanning guest selfies in {gs_dir}...")
+            for ext in image_extensions:
+                for selfie_path in gs_dir.rglob(f'*{ext}'):
+                    try:
+                        guest_name = selfie_path.stem
+                        img = Image.open(selfie_path).convert('RGB')
+                        img_array = np.array(img)
+                        faces = app.get(img_array)
+                        if faces:
+                            # Use the largest face if multiple
+                            faces = sorted(faces, key=lambda f: (f.bbox[2]-f.bbox[0])*(f.bbox[3]-f.bbox[1]), reverse=True)
+                            raw_emb = faces[0].embedding.astype(np.float32)
+                            norm_val = np.linalg.norm(raw_emb)
+                            guest_selfies[guest_name] = raw_emb / norm_val if norm_val > 0 else raw_emb
+                    except Exception as e:
+                        print(f"Failed to process selfie {selfie_path.name}: {e}")
+            print(f"Loaded {len(guest_selfies)} guest selfie embeddings.")
+
     persons = []
     for person_id, faces in person_faces.items():
         # Get unique photo names
@@ -300,10 +332,26 @@ def process_images(input_dirs, output_dir, tolerance=0.6, max_size=800, model_na
         avg_embedding = np.mean(embeddings, axis=0) if embeddings else None
         if avg_embedding is not None:
             avg_embedding /= np.linalg.norm(avg_embedding)
+            
+        display_name = f"شخص {len(persons) + 1}"
+        
+        # Match against guest selfies
+        if avg_embedding is not None and guest_selfies:
+            best_guest = None
+            best_sim = -1
+            for gname, gemb in guest_selfies.items():
+                sim = cosine_similarity(avg_embedding, gemb)
+                if sim > best_sim and sim > tolerance:
+                    best_sim = sim
+                    best_guest = gname
+            
+            if best_guest:
+                display_name = best_guest
+                print(f"Auto-linked {person_id} to guest: {best_guest} (sim: {best_sim:.3f})")
         
         persons.append({
             'personId': person_id,
-            'displayName': f"شخص {len(persons) + 1}",
+            'displayName': display_name,
             'photoCount': len(unique_photos),
             'sampleThumbnailName': faces[0]['thumbnailName'] if faces else '',
             'sampleThumbnailPath': faces[0]['thumbnailPath'] if faces else '',
@@ -344,9 +392,11 @@ def main():
     parser.add_argument('--tolerance', type=float, default=0.6, help='Recognition threshold (cosine sim)')
     parser.add_argument('--max-size', type=int, default=800, help='Max image dimension for processing')
     parser.add_argument('--model-name', default='buffalo_l', choices=['buffalo_l', 'buffalo_sc'], help='InsightFace model pack (buffalo_l or ultra-fast buffalo_sc)')
+    parser.add_argument('--manifest', help='Path to a text file with allowed image paths')
+    parser.add_argument('--guest-selfies-dir', help='Path to directory containing guest selfies')
     args = parser.parse_args()
     
-    process_images(args.input_dir, args.output_dir, args.tolerance, args.max_size, args.model_name)
+    process_images(args.input_dir, args.output_dir, args.tolerance, args.max_size, args.model_name, args.manifest, args.guest_selfies_dir)
 
 
 if __name__ == '__main__':

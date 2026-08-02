@@ -167,73 +167,144 @@ export default function App() {
               initial={{ opacity: 0, y: 28 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.3, duration: 0.55, ease: "easeOut" }}
-              className="w-full grid grid-cols-1 gap-3"
+              className="w-full grid grid-cols-1 gap-4"
               id="hub_cards_grid"
             >
-              {/* Card 1 — Guest Photography */}
-              <div className="glass-card rounded-2xl p-5 shadow-2xl" id="hub_guest_card">
-                <div className="flex items-center gap-2.5 mb-4">
-                  <div className="w-8 h-8 rounded-lg bg-rose-500/20 flex items-center justify-center border border-rose-500/30">
-                    <Camera className="w-4 h-4 text-rose-400" />
+              {/* Card 1 — Guest Photography (ShotBox Core Action) */}
+              <div 
+                role="button"
+                tabIndex={0}
+                id="hub_guest_card"
+                aria-label="ورود به عکاسی مهمان مراسم فاطمه و حمید"
+                onClick={() => navigateTo("guest", "fatemeh-hamid")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigateTo("guest", "fatemeh-hamid");
+                  }
+                }}
+                className="card-shotbox rounded-3xl p-6 relative overflow-hidden group cursor-pointer border backdrop-blur-2xl"
+              >
+                {/* Background Glow Mesh */}
+                <div className="absolute inset-0 bg-gradient-to-br from-rose-500/15 via-amber-500/5 to-transparent opacity-60 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                
+                {/* Top Badge Bar */}
+                <div className="flex items-center justify-between mb-4 relative z-10">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
+                    مراسم فعال · عکاسی مهمان
+                  </span>
+                  <span className="text-[10px] text-amber-300/80 font-mono tracking-wider">
+                    فاطمه & حمید
+                  </span>
+                </div>
+
+                {/* Main Card Content */}
+                <div className="flex items-center gap-4 mb-5 relative z-10">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-rose-500/30 to-amber-500/20 flex items-center justify-center border border-rose-500/40 shadow-xl shadow-rose-500/25 group-hover:scale-105 transition-transform duration-300">
+                    <Camera className="w-7 h-7 text-rose-300 group-hover:text-amber-200 transition-colors" />
                   </div>
                   <div>
-                    <h2 className="text-sm font-semibold text-white">عکاسی مهمان</h2>
-                    <p className="text-[10px] text-slate-400 leading-tight">لحظات مراسم را ثبت کنید</p>
+                    <h2 className="text-xl font-display font-bold text-white tracking-wide">دوربین عکاسی مهمان</h2>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">ثبت سریع عکس و ویدیو با فیلترهای نوستالژیک بدون نیاز به نصب برنامه</p>
                   </div>
                 </div>
+
+                {/* Action CTA Button */}
                 <motion.button
                   type="button"
                   id="hub_enter_ceremony_btn"
-                  onClick={() => navigateTo("guest", "fatemeh-hamid")}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.97 }}
-                  className="w-full btn-gradient py-3 px-4 rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-600/20"
-                  aria-label="ورود به مراسم فاطمه و حمید"
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="w-full btn-gradient py-3.5 px-4 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 shadow-2xl shadow-rose-600/35 relative z-10"
+                  aria-label="ورود به مراسم"
                 >
-                  <Heart className="w-4 h-4 animate-heart-beat" />
+                  <Heart className="w-5 h-5 animate-heart-beat text-amber-200" />
                   ورود به مراسم فاطمه و حمید
                 </motion.button>
               </div>
 
               {/* Cards 2+3 in a row */}
-              <div className="grid grid-cols-2 gap-3">
-                {/* Card 2 — Live Album */}
-                <div className="glass-card rounded-2xl p-4 shadow-2xl" id="hub_album_card">
-                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center border border-emerald-500/30 mb-3">
-                    <Images className="w-4 h-4 text-emerald-400" />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Card 2 — Live Album (Event Pulse Grid) */}
+                <div 
+                  role="button"
+                  tabIndex={0}
+                  id="hub_album_card"
+                  aria-label="مشاهده آلبوم زنده تصاویر مراسم"
+                  onClick={() => navigateTo("live", "fatemeh-hamid")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      navigateTo("live", "fatemeh-hamid");
+                    }
+                  }}
+                  className="card-emerald rounded-3xl p-5 relative overflow-hidden group cursor-pointer border backdrop-blur-2xl flex flex-col justify-between"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-500/15 via-teal-500/5 to-transparent opacity-60 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                  <div>
+                    <div className="flex items-center justify-between mb-3 relative z-10">
+                      <div className="w-11 h-11 rounded-2xl bg-emerald-500/20 flex items-center justify-center border border-emerald-500/40 shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform duration-300">
+                        <Images className="w-5 h-5 text-emerald-300" />
+                      </div>
+                      <span className="text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-mono">
+                        آلبوم زنده
+                      </span>
+                    </div>
+                    <h2 className="text-base font-display font-bold text-white mb-1 relative z-10">گالری و آلبوم زنده</h2>
+                    <p className="text-xs text-slate-300 leading-relaxed mb-4 relative z-10">مشاهده لحظه‌ای تصاویر و ویدیوهای ارسالی توسط مهمانان</p>
                   </div>
-                  <h2 className="text-xs font-semibold text-white mb-1">آلبوم زنده</h2>
-                  <p className="text-[9px] text-slate-400 leading-tight mb-3">مشاهده و دانلود عکس‌ها</p>
+                  
                   <motion.button
                     type="button"
                     id="hub_live_album_btn"
-                    onClick={() => navigateTo("live", "fatemeh-hamid")}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.97 }}
-                    className="w-full bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/30 hover:border-emerald-400 text-emerald-300 hover:text-white font-semibold py-2 px-2 rounded-xl text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer"
+                    className="w-full bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-500/40 hover:border-emerald-400 text-emerald-200 hover:text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-all relative z-10"
                   >
-                    <Images className="w-3 h-3" />
-                    مشاهده
+                    <Images className="w-4 h-4 text-emerald-300" />
+                    مشاهده آلبوم
                   </motion.button>
                 </div>
 
-                {/* Card 3 — Admin */}
-                <div className="glass-card rounded-2xl p-4 shadow-2xl" id="hub_admin_card">
-                  <div className="w-8 h-8 rounded-lg bg-slate-500/20 flex items-center justify-center border border-slate-500/30 mb-3">
-                    <Settings className="w-4 h-4 text-slate-400" />
+                {/* Card 3 — Admin Panel */}
+                <div 
+                  role="button"
+                  tabIndex={0}
+                  id="hub_admin_card"
+                  aria-label="ورود به پنل مدیریت رویداد"
+                  onClick={() => navigateTo("admin")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      navigateTo("admin");
+                    }
+                  }}
+                  className="card-indigo rounded-3xl p-5 relative overflow-hidden group cursor-pointer border backdrop-blur-2xl flex flex-col justify-between"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-indigo-500/15 via-purple-500/5 to-transparent opacity-60 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                  <div>
+                    <div className="flex items-center justify-between mb-3 relative z-10">
+                      <div className="w-11 h-11 rounded-2xl bg-indigo-500/20 flex items-center justify-center border border-indigo-500/40 shadow-lg shadow-indigo-500/20 group-hover:scale-105 transition-transform duration-300">
+                        <Settings className="w-5 h-5 text-indigo-300" />
+                      </div>
+                      <span className="text-[10px] bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-mono">
+                        کنترل رویداد
+                      </span>
+                    </div>
+                    <h2 className="text-base font-display font-bold text-white mb-1 relative z-10">پنل مدیریت رویداد</h2>
+                    <p className="text-xs text-slate-300 leading-relaxed mb-4 relative z-10">تنظیمات کارت دعوت، شناسایی چهره و ذخیره‌سازی محتوا</p>
                   </div>
-                  <h2 className="text-xs font-semibold text-white mb-1">مدیریت</h2>
-                  <p className="text-[9px] text-slate-400 leading-tight mb-3">پنل مدیریت رویداد</p>
+                  
                   <motion.button
                     type="button"
                     id="hub_admin_btn"
-                    onClick={() => navigateTo("admin")}
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.97 }}
-                    className="w-full bg-white/10 hover:bg-white/20 border border-white/15 text-white font-semibold py-2 px-2 rounded-xl text-[10px] flex items-center justify-center gap-1 transition-all cursor-pointer"
+                    className="w-full bg-indigo-500/20 hover:bg-indigo-500/35 border border-indigo-500/40 hover:border-indigo-400 text-indigo-200 hover:text-white font-bold py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-2 transition-all relative z-10"
                   >
-                    <Settings className="w-3 h-3" />
-                    ورود
+                    <Settings className="w-4 h-4 text-indigo-300" />
+                    ورود به مدیریت
                   </motion.button>
                 </div>
               </div>

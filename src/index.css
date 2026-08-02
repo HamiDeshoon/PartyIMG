@@ -222,12 +222,33 @@ h1, h2, h3, .font-display {
   white-space: nowrap;
 }
 
-/* === GLASSMORPHISM CARD === */
+/* === PREMIUM GLASSMORPHISM CARD === */
 .glass-card {
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.25);
+  position: relative;
+  transition: all 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(255,255,255,0.4), rgba(255,255,255,0.0));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.glass-card:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 20px 48px 0 rgba(0, 0, 0, 0.4);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, rgba(255, 255, 255, 0.05) 100%);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 /* === GRADIENT BUTTON === */
@@ -243,6 +264,63 @@ h1, h2, h3, .font-display {
   transform: translateY(-1px);
 }
 .btn-gradient:active { transform: scale(0.97); }
+
+/* === STITCH DESIGN SYSTEM: SHOTBOX & EVENT PULSE CARDS === */
+.card-shotbox {
+  background: linear-gradient(145deg, rgba(61, 37, 48, 0.7) 0%, rgba(42, 28, 34, 0.85) 100%);
+  border: 1px solid rgba(244, 63, 94, 0.25);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 0 20px -5px rgba(244, 63, 94, 0.15);
+  position: relative;
+  overflow: hidden;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-shotbox:hover, .card-shotbox:focus-visible {
+  border-color: rgba(244, 63, 94, 0.5);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.6), 0 0 30px 0px rgba(244, 63, 94, 0.25);
+  transform: translateY(-4px);
+}
+
+.card-shotbox:focus-visible {
+  outline: 2px solid #f43f5e;
+  outline-offset: 3px;
+}
+
+.card-emerald {
+  background: linear-gradient(145deg, rgba(20, 50, 40, 0.7) 0%, rgba(13, 35, 28, 0.85) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 0 20px -5px rgba(16, 185, 129, 0.15);
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-emerald:hover, .card-emerald:focus-visible {
+  border-color: rgba(16, 185, 129, 0.5);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.6), 0 0 30px 0px rgba(16, 185, 129, 0.25);
+  transform: translateY(-4px);
+}
+
+.card-emerald:focus-visible {
+  outline: 2px solid #10b981;
+  outline-offset: 3px;
+}
+
+.card-indigo {
+  background: linear-gradient(145deg, rgba(35, 30, 60, 0.7) 0%, rgba(22, 19, 42, 0.85) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 0 20px -5px rgba(99, 102, 241, 0.15);
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.card-indigo:hover, .card-indigo:focus-visible {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, 0.6), 0 0 30px 0px rgba(99, 102, 241, 0.25);
+  transform: translateY(-4px);
+}
+
+.card-indigo:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 3px;
+}
 
 /* === ORBS (ambient background) === */
 .orb {

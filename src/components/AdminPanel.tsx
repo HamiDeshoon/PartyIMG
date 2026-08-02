@@ -3,7 +3,7 @@ import {
   Plus, QrCode, Clipboard, Check, Trash2, Folder, 
   Settings, Sparkles, Download, Heart, Eye, Play, 
   RefreshCw, FileText, Terminal, ArrowLeft, Image, Video, Users, User, Printer, Activity, Share2, X,
-
+  LogOut,
   ChevronLeft, ChevronRight, CheckSquare, Square
 } from "lucide-react";
 import { EventConfig, FILM_FILTERS } from "../types";
@@ -290,6 +290,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const PAPER_SIZES: Record<string, { width: number; height: number; label: string }> = {
     '4x6': { width: 4, height: 6, label: '4×6"' },
     '5x7': { width: 5, height: 7, label: '5×7"' },
+    'a5': { width: 5.8, height: 8.3, label: 'A5' },
     'a6': { width: 4.1, height: 5.8, label: 'A6' },
     'table-tent': { width: 5, height: 4, label: 'Table Tent' },
   };
@@ -511,6 +512,12 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               }
             } else if (msg.type === 'media:deleted' && msg.data.eventId === selectedEventId) {
               setMediaItems(prev => prev.filter(m => m.id !== msg.data.mediaId));
+            } else if (msg.type === 'face-index-complete') {
+              // Auto-refresh face profiles when background or manual indexing completes
+              fetch(`/api/events/${selectedEventId}/face-profiles`)
+                .then(r => r.json())
+                .then(data => setFaceProfiles(data.profiles || []))
+                .catch(() => {});
             }
           } catch(e) {}
         };
@@ -803,146 +810,144 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // 1. Background Fill and Borders according to theme
+    // Redesigned Premium Template Layout
+    // 1. Base Background
     if (cardTheme === "slate") {
       const grad = ctx.createLinearGradient(0, 0, 0, 1500);
-      grad.addColorStop(0, "#090d16");
-      grad.addColorStop(0.5, "#0b0f19");
-      grad.addColorStop(1, "#120a1c");
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, 1000, 1500);
-
-      // Neon frame borders
-      ctx.strokeStyle = "rgba(236, 72, 153, 0.4)"; // bright pink
-      ctx.lineWidth = 4;
-      ctx.strokeRect(30, 30, 940, 1440);
-      ctx.strokeStyle = "rgba(139, 92, 246, 0.25)"; // indigo purple
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(38, 38, 924, 1424);
-
-      // Elegant pink markers in the 4 corners
-      ctx.fillStyle = "rgba(236, 72, 153, 0.7)";
-      ctx.fillRect(25, 25, 12, 12);
-      ctx.fillRect(963, 25, 12, 12);
-      ctx.fillRect(25, 1463, 12, 12);
-      ctx.fillRect(963, 1463, 12, 12);
+      grad.addColorStop(0, "#090d16"); grad.addColorStop(0.5, "#161129"); grad.addColorStop(1, "#0a0710");
+      ctx.fillStyle = grad; ctx.fillRect(0, 0, 1000, 1500);
     } else if (cardTheme === "cream") {
-      ctx.fillStyle = "#faf6ee"; // Ivory/cream
-      ctx.fillRect(0, 0, 1000, 1500);
-
-      // Gold-inspired classical frame
-      ctx.strokeStyle = "#c2933d"; 
-      ctx.lineWidth = 6;
-      ctx.strokeRect(35, 35, 930, 1430);
-      ctx.strokeStyle = "rgba(194, 147, 61, 0.35)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(45, 45, 910, 1410);
-
-      // Corner dots
-      ctx.fillStyle = "#c2933d";
-      ctx.beginPath();
-      ctx.arc(35, 35, 8, 0, Math.PI * 2);
-      ctx.arc(965, 35, 8, 0, Math.PI * 2);
-      ctx.arc(35, 1465, 8, 0, Math.PI * 2);
-      ctx.arc(965, 1465, 8, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.fillStyle = "#FCFAF8"; ctx.fillRect(0, 0, 1000, 1500);
+      ctx.fillStyle = "#FDFBF7"; ctx.fillRect(20, 20, 960, 1460);
     } else if (cardTheme === "neon") {
-      ctx.fillStyle = "#0a0710"; // Midnight void
-      ctx.fillRect(0, 0, 1000, 1500);
-
-      const bGrad = ctx.createLinearGradient(0, 0, 1000, 1500);
-      bGrad.addColorStop(0, "#c084fc"); // lighter purple
-      bGrad.addColorStop(1, "#f472b6"); // lighter pink
-      ctx.strokeStyle = bGrad;
-      ctx.lineWidth = 8;
-      ctx.strokeRect(25, 25, 950, 1450);
+      ctx.fillStyle = "#050308"; ctx.fillRect(0, 0, 1000, 1500);
     } else if (cardTheme === "sage") {
-      ctx.fillStyle = "#f4f6f4"; // Herb leaf green tint
-      ctx.fillRect(0, 0, 1000, 1500);
-
-      ctx.strokeStyle = "#2d4a34"; // Organic olive border
-      ctx.lineWidth = 4;
-      ctx.strokeRect(40, 40, 920, 1420);
-      ctx.strokeStyle = "rgba(45, 74, 52, 0.25)";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(48, 48, 904, 1404);
+      ctx.fillStyle = "#F2F5F3"; ctx.fillRect(0, 0, 1000, 1500);
     }
 
-    const textThemeColor = (light: string, dark: string) => (cardTheme === "cream" || cardTheme === "sage") ? light : dark;
+    // 2. Ornate Border Frame
+    const frameColor = cardTheme === "cream" ? "#D4AF37" : cardTheme === "sage" ? "#4A5D23" : cardTheme === "slate" ? "#E1BEE7" : "#C084FC";
+    const innerFrame = cardTheme === "cream" ? "rgba(212, 175, 55, 0.3)" : cardTheme === "sage" ? "rgba(74, 93, 35, 0.3)" : "rgba(255,255,255,0.15)";
+    
+    // Outer Thick Line
+    ctx.strokeStyle = frameColor;
+    ctx.lineWidth = 4;
+    ctx.strokeRect(40, 40, 920, 1420);
+    
+    // Inner Thin Line
+    ctx.strokeStyle = innerFrame;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(52, 52, 896, 1396);
 
-    // Header label
+    // Decorative Corner Elements
+    const drawCorner = (x: number, y: number, flipX: boolean, flipY: boolean) => {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(flipX ? -1 : 1, flipY ? -1 : 1);
+      ctx.beginPath();
+      ctx.moveTo(0, 40);
+      ctx.quadraticCurveTo(0, 0, 40, 0);
+      ctx.strokeStyle = frameColor;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      // Inner dot
+      ctx.beginPath();
+      ctx.arc(12, 12, 3, 0, Math.PI * 2);
+      ctx.fillStyle = frameColor;
+      ctx.fill();
+      ctx.restore();
+    };
+    drawCorner(30, 30, false, false);
+    drawCorner(970, 30, true, false);
+    drawCorner(30, 1470, false, true);
+    drawCorner(970, 1470, true, true);
+
+    const textColor = (cardTheme === "cream" || cardTheme === "sage") ? "#2C3E50" : "#FFFFFF";
+    const accentColor = frameColor;
+
+    // 3. Typography & Text Layout
+    // Greeting
     ctx.textAlign = "center";
-    ctx.fillStyle = textThemeColor("#706148", "#ec4899");
-    if (cardTheme === "sage") ctx.fillStyle = "#3f5e46";
-    if (cardTheme === "neon") ctx.fillStyle = "#f472b6";
-    ctx.font = "bold 24px 'Inter', system-ui, sans-serif";
-    ctx.fillText(cardGreeting.toUpperCase(), 500, 120);
+    ctx.fillStyle = accentColor;
+    ctx.font = "600 24px 'Vazirmatn', sans-serif";
+    ctx.letterSpacing = "2px";
+    ctx.fillText(cardGreeting, 500, 150);
 
-    // Title / Header Name
-    ctx.fillStyle = textThemeColor("#1a202c", "#ffffff");
-    if (cardTheme === "sage") ctx.fillStyle = "#1e3022";
-    ctx.font = "bold 56px 'Inter', system-ui, sans-serif";
-    ctx.fillText(cardTitle, 500, 210);
+    // Divider ornament top
+    ctx.font = "20px serif";
+    ctx.fillText("✧ ✦ ✧", 500, 200);
 
-    // Subtitle Link Text
-    ctx.fillStyle = textThemeColor("#4a5568", "#cbd5e1");
-    if (cardTheme === "sage") ctx.fillStyle = "#3a4c40";
-    ctx.font = "bold 26px 'Inter', system-ui, sans-serif";
-    ctx.fillText(cardSubtitle, 500, 275);
+    // Main Title
+    ctx.fillStyle = textColor;
+    ctx.font = "800 64px 'Vazirmatn', sans-serif";
+    ctx.letterSpacing = "0px";
+    // Title shadow for premium feel
+    if (cardTheme === "cream") {
+      ctx.shadowColor = "rgba(0,0,0,0.1)";
+      ctx.shadowBlur = 10;
+      ctx.shadowOffsetY = 4;
+    }
+    ctx.fillText(cardTitle, 500, 280);
+    ctx.shadowColor = "transparent"; // Reset shadow
 
-    // Mid Divider Line
-    ctx.strokeStyle = textThemeColor("rgba(194, 147, 61, 0.35)", "rgba(236, 72, 153, 0.25)");
-    if (cardTheme === "sage") ctx.strokeStyle = "rgba(45, 74, 52, 0.2)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(350, 315);
-    ctx.lineTo(650, 315);
-    ctx.stroke();
+    // Subtitle
+    ctx.fillStyle = (cardTheme === "cream" || cardTheme === "sage") ? "#596A7A" : "#A0AEC0";
+    ctx.font = "400 28px 'Vazirmatn', sans-serif";
+    ctx.fillText(cardSubtitle, 500, 340);
 
-    // QR Image size frame setup
-    const qrSize = 390;
+    // 4. Elegant QR Code Layout
+    const qrSize = 440;
     const qrx = 500 - qrSize / 2;
-    const qry = 380;
+    const qry = 420;
 
-    // Outer polaroid border background shadow
-    ctx.fillStyle = textThemeColor("rgba(0, 0, 0, 0.05)", "rgba(0, 0, 0, 0.45)");
-    ctx.fillRect(qrx - 15, qry - 15, qrSize + 30, qrSize + 30);
+    // QR Golden/Accent Frame
+    ctx.fillStyle = accentColor;
+    ctx.fillRect(qrx - 4, qry - 4, qrSize + 8, qrSize + 8);
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(qrx, qry, qrSize, qrSize);
 
-    // Clean Polaroid style card body
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(qrx - 10, qry - 10, qrSize + 20, qrSize + 20);
-
-    // Draw main image (QR)
+    // Load and draw QR
     const qrImg = new window.Image();
     qrImg.onload = () => {
-      ctx.drawImage(qrImg, qrx, qry, qrSize, qrSize);
+      ctx.drawImage(qrImg, qrx + 15, qry + 15, qrSize - 30, qrSize - 30);
 
-      // Polaroid caption decoration
-      ctx.fillStyle = textThemeColor("#b45309", "#ec4899");
-      if (cardTheme === "sage") ctx.fillStyle = "#2d4a34";
-      if (cardTheme === "neon") ctx.fillStyle = "#c084fc";
-      ctx.font = "38px 'Inter', system-ui, sans-serif";
-      ctx.fillText("📸", 500, qry + qrSize + 70);
+      // 5. Bottom Instructions Area
+      const boxY = qry + qrSize + 80;
+      
+      // Elegant box for instructions
+      ctx.fillStyle = (cardTheme === "cream" || cardTheme === "sage") ? "rgba(0,0,0,0.03)" : "rgba(255,255,255,0.05)";
+      ctx.fillRoundRect = function(x: number, y: number, w: number, h: number, r: number) {
+        this.beginPath(); this.moveTo(x+r, y); this.lineTo(x+w-r, y); this.arcTo(x+w, y, x+w, y+h, r); this.lineTo(x+w, y+h-r); this.arcTo(x+w, y+h, x+w-r, y+h, r); this.lineTo(x+r, y+h); this.arcTo(x, y+h, x, y+h-r, r); this.lineTo(x, y+r); this.arcTo(x, y, x+r, y, r); this.closePath(); this.fill();
+      };
+      (ctx as any).fillRoundRect(150, boxY, 700, 160, 20);
 
-      // Mid Instructions wrapped text lines
-      ctx.fillStyle = textThemeColor("#2d3748", "#e2e8f0");
-      if (cardTheme === "slate") ctx.fillStyle = "#cbd5e1";
-      if (cardTheme === "neon") ctx.fillStyle = "#f3f4f6";
-      ctx.font = "bold 25px 'Inter', system-ui, sans-serif";
-      const instructionY = qry + qrSize + 130;
-      drawWrappedText(ctx, cardInstructions, 500, instructionY, 760, 38);
+      // Camera Icon / Decorator
+      ctx.fillStyle = accentColor;
+      ctx.font = "32px 'Vazirmatn', sans-serif";
+      ctx.fillText("📷", 500, boxY + 45);
 
-      // Card footer details
-      ctx.fillStyle = textThemeColor("#718096", "rgba(255, 255, 255, 0.4)");
-      if (cardTheme === "neon") ctx.fillStyle = "rgba(192, 132, 252, 0.7)";
-      ctx.font = "bold 20px 'Inter', system-ui, sans-serif";
-      ctx.fillText(cardFooter, 500, 1420);
+      // Instructions text
+      ctx.fillStyle = textColor;
+      ctx.font = "400 24px 'Vazirmatn', sans-serif";
+      ctx.lineHeight = 36;
+      drawWrappedText(ctx, cardInstructions, 500, boxY + 95, 600, 40);
 
-      // Trigger standard instant PNG download payload
-      const dataUrl = canvas.toDataURL("image/png");
+      // Divider ornament bottom
+      ctx.fillStyle = accentColor;
+      ctx.font = "20px serif";
+      ctx.fillText("✧ ✦ ✧", 500, 1380);
+
+      // Footer
+      ctx.fillStyle = (cardTheme === "cream" || cardTheme === "sage") ? "#7F8C8D" : "#CBD5E1";
+      ctx.font = "600 22px 'Vazirmatn', sans-serif";
+      ctx.letterSpacing = "1px";
+      ctx.fillText(cardFooter, 500, 1430);
+
+      // Download trigger
+      const dataUrl = canvas.toDataURL("image/png", 1.0);
       const a = document.createElement("a");
       a.href = dataUrl;
-      a.download = `${selectedEventId || "event"}-printable-invitation-card.png`;
+      a.download = `${selectedEventId || "event"}-premium-invitation.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1170,12 +1175,15 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
           </div>
         </div>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <button type="button"
+            id="admin_logout_btn"
             onClick={handleLogout}
-            className="hidden md:flex border border-white/20 hover:bg-white/10 text-white font-medium py-2 px-4 rounded-xl text-sm items-center gap-2 transition-all cursor-pointer"
+            aria-label="خروج از پنل مدیریت"
+            className="flex border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/25 text-rose-200 hover:text-white font-medium py-2 px-3 sm:px-4 rounded-xl text-xs sm:text-sm items-center gap-1.5 transition-all cursor-pointer active:scale-95"
           >
-            خروج
+            <LogOut className="w-4 h-4 text-rose-400" />
+            <span>خروج</span>
           </button>
           <button type="button"
             id="admin_create_event_trigger"
@@ -1470,12 +1478,13 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                       max="0.85" 
                       step="0.05"
                       value={faceTolerance} 
+                      disabled={isSyncingFaces}
                       onChange={e => {
                         const val = parseFloat(e.target.value);
                         setFaceTolerance(val);
                         localStorage.setItem("faceTolerance", val.toString());
                       }}
-                      className="w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-teal-400"
+                      className={`w-full h-1 bg-white/10 rounded-lg appearance-none cursor-pointer accent-teal-400 ${isSyncingFaces ? 'opacity-40 cursor-not-allowed' : ''}`}
                     />
                     <div className="flex justify-between text-[9px] text-slate-500 font-mono select-none">
                       <span>0.25 (آسان‌گیرانه - ادغام بیشتر چهره‌ها)</span>
@@ -2332,7 +2341,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                     پرینت مستقیم کارت (Print)
                   </button>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2 mt-2">
                     <button type="button"
                       onClick={() => { downloadPostalCard(); }}
                       className="bg-white/10 hover:bg-white/20 border border-white/15 text-slate-200 text-[11px] font-bold py-2 px-3 rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5">
