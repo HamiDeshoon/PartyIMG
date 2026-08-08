@@ -9,7 +9,7 @@ import {
 import QRCode from "qrcode";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { toast } from "sonner";
-import WeddingCardDesigner from "./WeddingCardDesigner";
+
 
 interface AdminPanelProps {
   onBackToHome: () => void;
@@ -296,8 +296,6 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [authError, setAuthError] = useState("");
   const [activeTab, setActiveTab] = useState<string>("media");
 
-  // Wedding Card Designer state
-  const [showCardDesigner, setShowCardDesigner] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState("");
 
   // Analytics Computation
@@ -743,16 +741,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     document.body.removeChild(a);
   };
 
-  // Print/Download handlers for WeddingCardDesigner
-  const handlePrintCard = () => {
-    // The WeddingCardDesigner component handles printing internally
-    // This is a placeholder for any additional logic needed
-  };
 
-  const handleDownloadCard = () => {
-    // The WeddingCardDesigner component handles downloading internally
-    // This is a placeholder for any additional logic needed
-  };
 
   if (!isAuthenticated) {
     return (
@@ -936,13 +925,6 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
                   <button
-                    onClick={() => setShowCardDesigner(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer shadow-lg"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    <span className="font-vazir">استودیو کارت دعوت</span>
-                  </button>
-                  <button
                     onClick={handleNativeShare}
                     className="px-4 py-2 bg-slate-800/50 hover:bg-slate-700/50 text-slate-300 hover:text-white transition-all cursor-pointer border border-slate-700/50 rounded-xl flex items-center gap-2"
                   >
@@ -959,7 +941,6 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                 {[
                   { id: "media", label: "رسانه‌ها", icon: Image, count: mediaItems.length },
                   { id: "analytics", label: "تحلیل‌ها", icon: BarChart },
-                  { id: "card", label: "کارت دعوت", icon: Sparkles },
                   { id: "faces", label: "شناسایی چهره", icon: User, badge: faceProfiles.length },
                   { id: "sync", label: "همگام‌سازی", icon: RefreshCw },
                   { id: "settings", label: "تنظیمات", icon: Settings },
@@ -1143,90 +1124,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                 </div>
               )}
 
-              {/* Wedding Card Tab */}
-              {activeTab === "card" && (
-                <div className="space-y-6 animate-fade-in">
-                  <div className="p-6 bg-gradient-to-br from-slate-900 via-[#1f151c] to-slate-900 rounded-3xl border border-rose-500/20 shadow-2xl relative overflow-hidden">
-                    {/* Background Ornate Mesh */}
-                    <div className="absolute top-0 right-0 w-96 h-96 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
-                    <div className="absolute bottom-0 left-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
 
-                    <div className="flex flex-col lg:flex-row items-center justify-between gap-8 relative z-10">
-                      {/* Left side info & CTA */}
-                      <div className="space-y-5 max-w-xl text-right">
-                        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-xs font-bold font-vazir">
-                          <Sparkles className="w-4 h-4 text-amber-300" />
-                          طراحی کارت دعوت دیجیتال و چاپی
-                        </div>
-                        <h3 className="text-3xl font-extrabold text-white font-vazir tracking-tight">
-                          استودیو کارت دعوت <span className="bg-gradient-to-r from-rose-400 to-amber-300 bg-clip-text text-transparent">{selectedEvent?.name || "مراسم عروسی"}</span>
-                        </h3>
-                        <p className="text-slate-300 font-vazir text-sm leading-relaxed">
-                          کارت دعوت اختصاصی مراسم همراه با کد QR هوشمند مهمانان، قالب‌های متعددی نظیر طلاي شاهانه، رز مخملی، زیتونی کلاسیک و گزینه‌های سفارشی‌سازی متن، چاپ و دانلود تصویر با کیفیت بالا.
-                        </p>
-
-                        <div className="flex flex-wrap gap-3 pt-2">
-                          <button
-                            onClick={() => setShowCardDesigner(true)}
-                            className="px-6 py-3.5 bg-gradient-to-r from-rose-500 via-pink-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-white font-bold rounded-2xl transition-all shadow-xl shadow-rose-500/25 flex items-center gap-2.5 text-sm cursor-pointer transform hover:scale-[1.02]"
-                          >
-                            <Sparkles className="w-5 h-5 text-amber-200 animate-pulse" />
-                            <span className="font-vazir">ورود به استودیو کارت دعوت (ویرایش کامل)</span>
-                          </button>
-
-                          {qrCodeDataUrl && (
-                            <button
-                              onClick={downloadStandaloneQR}
-                              className="px-5 py-3.5 bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 border border-slate-700/80 rounded-2xl transition-all flex items-center gap-2 text-sm cursor-pointer font-vazir"
-                            >
-                              <Download className="w-4 h-4 text-amber-300" />
-                              دانلود کد QR
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Right side live interactive Card Preview Box */}
-                      <div className="w-full max-w-sm shrink-0">
-                        <div className="relative rounded-3xl p-6 bg-[#1a131b] border-2 border-amber-500/40 shadow-2xl shadow-rose-950/60 overflow-hidden text-center space-y-4">
-                          {/* Inner gold frame line */}
-                          <div className="absolute inset-2 border border-amber-400/30 rounded-2xl pointer-events-none" />
-                          
-                          <div className="pt-2">
-                            <span className="text-[11px] font-mono tracking-widest text-amber-400 uppercase">مراسم پیوند و جشن ازدواج</span>
-                            <h4 className="text-2xl font-bold text-white font-vazir mt-1">{selectedEvent?.name || "فاطمه & حمید"}</h4>
-                          </div>
-
-                          <div className="py-2 flex items-center justify-center">
-                            {qrCodeDataUrl ? (
-                              <div className="p-3 bg-white rounded-2xl shadow-xl border border-amber-300/40">
-                                <img src={qrCodeDataUrl} alt="Guest QR Code" className="w-44 h-44 object-contain" />
-                              </div>
-                            ) : (
-                              <div className="w-44 h-44 bg-slate-800/50 rounded-2xl border border-slate-700 flex items-center justify-center">
-                                <QrCode className="w-12 h-12 text-slate-500" />
-                              </div>
-                            )}
-                          </div>
-
-                          <div className="space-y-1 pb-2">
-                            <p className="text-xs text-amber-200 font-vazir">اسکن کنید و عکس‌ها و فیلم‌های خود را ارسال کنید</p>
-                            <p className="text-[10px] text-slate-400 font-mono">PartyIMG ShotBox System</p>
-                          </div>
-
-                          <button
-                            onClick={() => setShowCardDesigner(true)}
-                            className="w-full py-2.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 rounded-xl text-xs font-vazir font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                          >
-                            <Sparkles className="w-4 h-4" />
-                            تغییر قالب و ویرایش کارت
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* Faces Tab */}
               {activeTab === "faces" && (
@@ -1506,15 +1404,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
           </>
         )}
 
-        {/* Wedding Card Designer Modal */}
-        <WeddingCardDesigner
-          isOpen={showCardDesigner}
-          onClose={() => setShowCardDesigner(false)}
-          selectedEvent={selectedEvent}
-          qrCodeDataUrl={qrCodeDataUrl}
-          onPrint={handlePrintCard}
-          onDownload={handleDownloadCard}
-        />
+
 
         {/* Create Event Modal */}
         {showCreateModal && (

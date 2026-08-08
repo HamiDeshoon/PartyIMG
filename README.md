@@ -1,84 +1,104 @@
-# POV Shared Photo Album
+# ShotBox — Party & Event Live Polaroid Photo Album
 
-**A full-stack shared wedding and party photo album application.**
-
-Hosts can create custom events, generate QR codes, specify save directories to sync to localhost, and configure upload limits. Guests can capture/upload photos with aesthetic retro filters and record 30‑second videos.
+**ShotBox (PartyIMG)** is a full-stack, high-performance shared event photo album system. It enables guests to capture, filter, and instantly upload photos and videos during events, while offering real-time polaroid slideshows, face recognition filtering, and flexible host SSD/Cloud storage management.
 
 ---
 
-## Table of Contents
+## 🌟 Key Features
 
-1. [Features](#features)
-2. [Getting Started](#getting-started)
-3. [Documentation](#documentation)
-4. [Contributing](#contributing)
-5. [License](#license)
+- **Guest Camera Experience**:
+  - Instant web camera capture & video recording (up to 30s) without installing any app.
+  - Analog film filters (Kodak Gold, Fujifilm Superia, B&W Noir, Cyberpunk).
+  - Chunked streaming upload pipeline with progress tracking.
+- **Dynamic Live Polaroid Album**:
+  - Textured Polaroid card aesthetic with alternating washi tape & metallic pin accents.
+  - Micro-rotations, hover elevation physics, handwritten captions (Caveat cursive font), and likes counter.
+  - Fullscreen glassmorphic lightbox modal with swipe controls and instant single/batch zip downloads.
+  - Interactive Auto-play Slideshow presentation mode.
+  - Integrated **Face Recognition Filter**: Automatic face detection & clustering (InsightFace CPU worker) allowing guests to filter photos containing specific individuals.
+- **Admin Control Dashboard**:
+  - Event configuration (custom slugs, guest upload limits, max video length, reveal styles).
+  - External storage path hot-swapping (e.g. `D:\Wedding` -> `E:\EventPhotos`).
+  - Interactive activity analytics graphs (Recharts timeline & top contributor metrics).
+  - Face Index trigger runner & batch media deletion control.
+- **Robust Architecture & Storage**:
+  - SQLite database abstraction (`db.ts`).
+  - Storage provider abstraction supporting local physical disk writes and Cloudflare R2 bucket storage (`storage.ts`).
+  - Integrated Knowledge Graph generator (`npm run graph`).
 
 ---
 
-## Features
+## 🚀 Getting Started
 
-- **Event Management**: Create, update, and delete events with customizable settings.
-- **QR Code Integration**: Generate QR codes for easy event sharing.
-- **Retro Filters**: Apply vintage filters to photos before upload.
-- **Video Support**: Record up to 30‑second videos.
-- **Admin Panel**: Secure admin interface for event configuration.
-- **Guest Panel**: Simple UI for guests to capture and upload media.
-- **Local & Edge Deployments**: Works locally with SQLite or can be migrated to Cloudflare Workers.
+### Prerequisites
 
-## Getting Started
+- Node.js (v18+)
+- Python 3.9+ (optional, for background InsightFace face detection worker)
 
-1. **Clone the repository**
+### Installation & Run
+
+1. **Clone & Install Dependencies**
    ```bash
    git clone https://github.com/yourusername/PartyIMG.git
    cd PartyIMG
-   ```
-2. **Install dependencies**
-   ```bash
    npm install
    ```
-3. **Create an environment file**
-   ```bash
-   cp .env.example .env
+
+2. **Configure Environment Variables**
+   Create a `.env` file in the project root:
+   ```env
+   PORT=3000
+   SESSION_SECRET=your_super_secret_session_key_min_32_chars
+   ADMIN_USERNAME=admin
+   ADMIN_PASSWORD=adminpass
+   # Optional Cloudflare R2 Storage:
+   USE_R2=false
    ```
-   Fill in `SESSION_SECRET` (minimum 32 characters) along with `ADMIN_USERNAME` and `ADMIN_PASSWORD`.
-4. **Run the development server**
+
+3. **Start Development Server**
    ```bash
    npm run dev
    ```
-   The frontend will be served at `http://localhost:5173` and the API at `http://localhost:3000`.
+   - App UI: `http://localhost:5173`
+   - Express Server: `http://localhost:3000`
 
-For detailed build and deployment instructions, see the **Documentation** section below.
+4. **Build & Production Deployment**
+   ```bash
+   npm run build
+   npm start
+   ```
 
-## Documentation
+5. **Generate Knowledge Graph**
+   ```bash
+   npm run graph
+   ```
 
-The `docs` folder contains in‑depth documentation:
+---
 
-| Document | Description |
-|----------|-------------|
-| `architecture-report.md` | Overview of system architecture (frontend, backend, database, upload pipeline, authentication flow, and build pipeline). |
-| `bug-report.md` | List of identified bugs and their resolutions, covering UI memory leaks, orphan media, security misconfigurations, and upload limit handling. |
-| `cloudflare-audit.md` | Compatibility audit for Cloudflare Workers, highlighting filesystem, SQLite, and process‑spawning limitations with migration recommendations. |
-| `deployment-guide.md` | Prerequisites, build steps, local setup, and deployment instructions for Cloud Run and Cloudflare. |
-| `performance-audit.md` | Performance optimizations for both frontend (code‑splitting, lazy loading) and backend (storage abstraction, upload speed), plus measured metrics. |
-| `production-readiness.md` | Production checklist, backup strategy, rollback plan, monitoring setup, and next steps for edge transition. |
-| `security-audit.md` | Security hardening details: session management, CSRF protection, upload validation, rate limiting, and other mitigations. |
-| `ux-review.md` | UI/UX review covering new preview sandbox, empty/error states, feedback overlays, and usability polish. |
+## 📁 System Architecture & Structure
 
-You can explore each document for more granular information about the project.
+```
+PartyIMG/
+├── src/
+│   ├── components/
+│   │   ├── AdminPanel.tsx   # Admin dashboard, event config, media sync, analytics
+│   │   ├── GuestPanel.tsx   # Vintage camera capture UI, filter presets & uploader
+│   │   └── LiveAlbum.tsx    # Live Polaroid grid, slideshow, face profiles & lightbox
+│   ├── App.tsx              # Main layout shell & hash route router
+│   ├── types.ts             # TypeScript interface definitions & film filter presets
+│   ├── index.css            # Design tokens, polaroid paper texture & keyframe animations
+│   └── knowledgeGraph.ts    # Codebase architectural knowledge graph builder
+├── scripts/
+│   └── face_recognizer_insightface.py # Python face detection & vector clustering engine
+├── server.ts                # Express backend, WebSocket server & face indexing triggers
+├── db.ts                    # SQLite database migration & query helper layer
+├── storage.ts               # Storage abstraction (Local Disk / Cloudflare R2)
+├── knowledge-graph.json     # Machine-readable codebase architecture map
+└── README.md
+```
 
-## Contributing
+---
 
-Contributions are welcome! Please follow these steps:
+## 📄 License
 
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature/YourFeature`).
-3. Commit your changes with clear messages.
-4. Open a pull request describing the changes and referencing any relevant issues.
-
-Make sure to run the test suite (`npm test`) and linting (`npm run lint`) before submitting.
-
-## License
-
-This project is licensed under the MIT License. See the `LICENSE` file for details.
-
+This project is licensed under the MIT License.
