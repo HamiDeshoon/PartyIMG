@@ -7,7 +7,7 @@ export class CanvaClient {
   private async getAxios(): Promise<AxiosInstance> {
     const token = await getValidAccessToken();
     return axios.create({
-      baseURL: 'https://api.canva.com/v1',
+      baseURL: 'https://api.canva.com/rest/v1',
       headers: {
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json'

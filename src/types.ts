@@ -60,22 +60,76 @@ export const FILM_FILTERS: FilterPreset[] = [
     colorClass: "bg-slate-100 text-slate-900"
   },
   {
-    id: "west",
-    name: "West Classic",
-    emoji: "🌅",
-    cssStyle: "contrast(1.05) brightness(1.08) saturate(0.92) sepia(0.08) hue-rotate(-3deg)",
-    canvasFilter: "contrast(1.05) brightness(1.08) saturate(0.92) sepia(0.08) hue-rotate(-3deg)",
-    description: "Clean, warm tones with subtle vintage warmth. Inspired by the iconic West iOS filter.",
+    id: "wedding",
+    name: "Wedding",
+    emoji: "💍",
+    cssStyle: "brightness(1.08) contrast(0.94) saturate(0.85) sepia(0.18) hue-rotate(5deg)",
+    canvasFilter: "brightness(1.08) contrast(0.94) saturate(0.85) sepia(0.18) hue-rotate(5deg)",
+    description: "روشن، گرم، و رمانتیک — ایده‌آل برای عروسی.",
+    colorClass: "bg-rose-50 text-rose-900"
+  },
+  {
+    id: "old",
+    name: "Old Film",
+    emoji: "🎞️",
+    cssStyle: "sepia(0.72) contrast(1.08) brightness(0.9) saturate(0.65) hue-rotate(-8deg)",
+    canvasFilter: "sepia(0.72) contrast(1.08) brightness(0.9) saturate(0.65) hue-rotate(-8deg)",
+    description: "حال و هوای عکس‌های قدیمی دهه ۵۰ تا ۷۰.",
     colorClass: "bg-amber-100 text-amber-900"
+  },
+  {
+    id: "polaroid",
+    name: "Polaroid",
+    emoji: "📷",
+    cssStyle: "contrast(0.92) brightness(1.12) saturate(0.78) sepia(0.12) hue-rotate(3deg)",
+    canvasFilter: "contrast(0.92) brightness(1.12) saturate(0.78) sepia(0.12) hue-rotate(3deg)",
+    description: "رنگ‌های ملایم، فِید ملایم — مثل عکس‌های پولاروید واقعی.",
+    colorClass: "bg-yellow-50 text-yellow-900"
   },
   {
     id: "vhs",
     name: "VHS Retro",
     emoji: "📼",
-    cssStyle: "contrast(1.2) saturate(1.2) sepia(0.2) hue-rotate(-15deg) brightness(0.95)",
-    canvasFilter: "contrast(1.2) saturate(1.2) sepia(0.2) hue-rotate(-15deg) brightness(0.95)",
+    cssStyle: "contrast(1.22) saturate(1.25) sepia(0.2) hue-rotate(-18deg) brightness(0.93)",
+    canvasFilter: "contrast(1.22) saturate(1.25) sepia(0.2) hue-rotate(-18deg) brightness(0.93)",
     description: "حس و حال نوارهای قدیمی دهه ۹۰ با کنترلاست بالا.",
     colorClass: "bg-purple-100 text-purple-900"
+  },
+  {
+    id: "noir",
+    name: "B&W Noir",
+    emoji: "🎬",
+    cssStyle: "grayscale(1) contrast(1.2) brightness(0.9)",
+    canvasFilter: "grayscale(1) contrast(1.2) brightness(0.9)",
+    description: "سیاه و سفید تماشایی با کنترست بالا.",
+    colorClass: "bg-zinc-100 text-zinc-900"
+  },
+  {
+    id: "kodak",
+    name: "Kodak Gold",
+    emoji: "🌄",
+    cssStyle: "contrast(1.06) brightness(1.05) saturate(1.18) sepia(0.1) hue-rotate(-5deg)",
+    canvasFilter: "contrast(1.06) brightness(1.05) saturate(1.18) sepia(0.1) hue-rotate(-5deg)",
+    description: "رنگ‌های گرم، اشباع‌شده — مثل فیلم Kodak Gold 200.",
+    colorClass: "bg-amber-100 text-amber-900"
+  },
+  {
+    id: "cinematic",
+    name: "Cinematic",
+    emoji: "🎥",
+    cssStyle: "contrast(1.12) brightness(0.92) saturate(0.82) sepia(0.05) hue-rotate(10deg)",
+    canvasFilter: "contrast(1.12) brightness(0.92) saturate(0.82) sepia(0.05) hue-rotate(10deg)",
+    description: "پالت رنگی سینمایی — تیره، غنی، و دراماتیک.",
+    colorClass: "bg-teal-100 text-teal-900"
+  },
+  {
+    id: "west",
+    name: "West Classic",
+    emoji: "🌅",
+    cssStyle: "contrast(1.05) brightness(1.08) saturate(0.92) sepia(0.08) hue-rotate(-3deg)",
+    canvasFilter: "contrast(1.05) brightness(1.08) saturate(0.92) sepia(0.08) hue-rotate(-3deg)",
+    description: "گرم و خوشایند با وینتیج ملایم.",
+    colorClass: "bg-amber-100 text-amber-900"
   },
   {
     id: "portrait",
@@ -83,7 +137,7 @@ export const FILM_FILTERS: FilterPreset[] = [
     emoji: "🌸",
     cssStyle: "contrast(1.02) brightness(1.1) saturate(1.05) sepia(0.02)",
     canvasFilter: "contrast(1.02) brightness(1.1) saturate(1.05) sepia(0.02)",
-    description: "نرمی تُن پوست و روشنایی ملایم، عالی برای عکس‌های پرتره.",
+    description: "نرمی تُن پوست و روشنایی ملایم، عالی برای پرتره.",
     colorClass: "bg-rose-100 text-rose-900"
   }
 ];
