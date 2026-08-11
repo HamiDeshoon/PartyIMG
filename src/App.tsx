@@ -1,14 +1,17 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster } from "sonner";
-import { Camera, Images, Settings, Heart, Loader } from "lucide-react";
+import { Camera, Images, Settings, Heart, Loader, Gift, Sparkles } from "lucide-react";
 
 const AdminPanel = lazy(() => import("./components/AdminPanel"));
 const GuestPanel = lazy(() => import("./components/GuestPanel"));
 const LiveAlbum  = lazy(() => import("./components/LiveAlbum"));
+const GiftPage   = lazy(() => import("./components/GiftPage"));
+
+type PanelName = "hub" | "admin" | "guest" | "live" | "gift";
 
 interface AppRoute {
-  panel: "hub" | "admin" | "guest" | "live";
+  panel: PanelName;
   guestEventId?: string;
 }
 
@@ -41,6 +44,9 @@ export default function App() {
     } else if (hash.startsWith("#/guest/")) {
       const eventId = hash.split("/")[2];
       setRoute(eventId ? { panel: "guest", guestEventId: eventId.toLowerCase().trim() } : { panel: "hub" });
+    } else if (hash.startsWith("#/gift/")) {
+      const eventId = hash.split("/")[2];
+      setRoute(eventId ? { panel: "gift", guestEventId: eventId.toLowerCase().trim() } : { panel: "hub" });
     } else {
       setRoute({ panel: "hub" });
     }
@@ -52,11 +58,12 @@ export default function App() {
     return () => window.removeEventListener("hashchange", parseHashRoute);
   }, []);
 
-  const navigateTo = (panel: "hub" | "admin" | "guest" | "live", guestId?: string) => {
+  const navigateTo = (panel: PanelName, guestId?: string) => {
     if (panel === "hub")               window.location.hash = "/";
     else if (panel === "admin")        window.location.hash = "/admin";
     else if (panel === "live"  && guestId) window.location.hash = `/live/${guestId}`;
     else if (panel === "guest" && guestId) window.location.hash = `/guest/${guestId}`;
+    else if (panel === "gift"  && guestId) window.location.hash = `/gift/${guestId}`;
   };
 
   return (
@@ -96,6 +103,15 @@ export default function App() {
             transition={{ duration: 0.22, ease: "easeOut" }} className="z-10 flex-1 flex flex-col">
             <Suspense fallback={<LoadingScreen />}>
               <LiveAlbum eventId={route.guestEventId} onBackToHome={() => navigateTo("hub")} />
+            </Suspense>
+          </motion.div>
+        )}
+
+        {route.panel === "gift" && route.guestEventId && (
+          <motion.div key="gift" variants={panelVariants} initial="initial" animate="animate" exit="exit"
+            transition={{ duration: 0.22, ease: "easeOut" }} className="z-10 flex-1 flex flex-col">
+            <Suspense fallback={<LoadingScreen />}>
+              <GiftPage eventId={route.guestEventId} onBackToHome={() => navigateTo("hub")} />
             </Suspense>
           </motion.div>
         )}
@@ -170,8 +186,63 @@ export default function App() {
               className="w-full grid grid-cols-1 gap-4"
               id="hub_cards_grid"
             >
-              {/* Card 1 — Guest Photography (ShotBox Core Action) */}
-              <div 
+              {/* Card 1 — Gift to the bride & groom (primary action) */}
+              <div
+                role="button"
+                tabIndex={0}
+                id="hub_gift_card"
+                aria-label="هدیه به عروس و داماد — مشاهده اطلاعات کارت و ثبت رسید"
+                onClick={() => navigateTo("gift", "fatemeh-hamid")}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigateTo("gift", "fatemeh-hamid");
+                  }
+                }}
+                className="card-amber rounded-3xl p-6 relative overflow-hidden group cursor-pointer border backdrop-blur-2xl"
+              >
+                {/* Background glow mesh */}
+                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/20 via-rose-500/8 to-transparent opacity-70 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                {/* Soft sheen that sweeps across on hover */}
+                <div className="absolute -inset-x-full inset-y-0 bg-gradient-to-r from-transparent via-white/8 to-transparent -skew-x-12 translate-x-0 group-hover:translate-x-[200%] transition-transform duration-[1400ms] ease-out pointer-events-none" aria-hidden="true" />
+
+                <div className="flex items-center justify-between mb-4 relative z-10">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-200 border border-amber-500/30">
+                    <Sparkles className="w-3 h-3 text-amber-300" strokeWidth={2} />
+                    محبت شما · هدیه عروسی
+                  </span>
+                  <span className="text-[10px] text-rose-300/80 font-mono tracking-wider">
+                    کارت &amp; شبا
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-4 mb-5 relative z-10">
+                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-amber-500/30 to-rose-500/20 flex items-center justify-center border border-amber-500/40 shadow-xl shadow-amber-500/25 group-hover:scale-105 group-hover:rotate-6 transition-transform duration-300 shrink-0">
+                    <Gift className="w-7 h-7 text-amber-300 group-hover:text-rose-200 transition-colors" strokeWidth={1.6} />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-display font-bold text-white tracking-wide">هدیه به عروس و داماد</h2>
+                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                      شماره کارت و شبا، همراه با امکان ارسال رسید و یک پیام محرمانه برای عروس و داماد
+                    </p>
+                  </div>
+                </div>
+
+                <motion.button
+                  type="button"
+                  id="hub_gift_btn"
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="w-full py-3.5 px-4 rounded-2xl text-sm font-bold flex items-center justify-center gap-2 relative z-10 bg-gradient-to-r from-amber-500 to-rose-500 text-[#2a1c22] shadow-2xl shadow-amber-600/35"
+                  aria-label="مشاهده صفحه هدیه"
+                >
+                  <Gift className="w-5 h-5" strokeWidth={2} />
+                  مشاهده اطلاعات هدیه
+                </motion.button>
+              </div>
+
+              {/* Card 2 — Guest Photography (ShotBox Core Action) */}
+              <div
                 role="button"
                 tabIndex={0}
                 id="hub_guest_card"
@@ -224,10 +295,10 @@ export default function App() {
                 </motion.button>
               </div>
 
-              {/* Cards 2+3 in a row */}
+              {/* Cards 3+4 in a row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Card 2 — Live Album (Event Pulse Grid) */}
-                <div 
+                {/* Card 3 — Live Album (Event Pulse Grid) */}
+                <div
                   role="button"
                   tabIndex={0}
                   id="hub_album_card"
@@ -267,8 +338,8 @@ export default function App() {
                   </motion.button>
                 </div>
 
-                {/* Card 3 — Admin Panel */}
-                <div 
+                {/* Card 4 — Admin Panel */}
+                <div
                   role="button"
                   tabIndex={0}
                   id="hub_admin_card"

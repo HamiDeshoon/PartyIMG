@@ -10,9 +10,14 @@ database.sqlite
 *.sqlite-shm
 *.sqlite-wal
 uploads/
+# Guest gift receipts (payment screenshots) — private by design, never commit.
+private/
 scripts/insightface_models/
 *.onnx
 *.pth
 *.params
 
 canva-tokens.json
+smoketmp/
+.remember/
+mcp-servers/

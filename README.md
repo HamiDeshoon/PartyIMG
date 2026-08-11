@@ -18,7 +18,7 @@
   - Integrated **Face Recognition Filter**: Automatic face detection & clustering (InsightFace CPU worker) allowing guests to filter photos containing specific individuals.
 - **Admin Control Dashboard**:
   - Event configuration (custom slugs, guest upload limits, max video length, reveal styles).
-  - External storage path hot-swapping (e.g. `D:\Wedding` -> `E:\EventPhotos`).
+  - External storage path hot-swapping (e.g. `D:\Wedding` -> `F:\Wedding`).
   - Interactive activity analytics graphs (Recharts timeline & top contributor metrics).
   - Face Index trigger runner & batch media deletion control.
 - **Robust Architecture & Storage**:

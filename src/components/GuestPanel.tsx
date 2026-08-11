@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
-import { 
+import {
   Camera, Video, User, Sparkles, Heart, Image, X,
   Lock, Unlock, Check, AlertCircle, Loader, ArrowLeft, Trash2, WifiOff,
-  ChevronLeft, ChevronRight, Download, LogOut
+  ChevronLeft, ChevronRight, Download, LogOut, RefreshCw, UploadCloud, Cog, Film
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { FILM_FILTERS, FilterPreset } from "../types";
@@ -11,6 +11,23 @@ import { toast } from "sonner";
 interface GuestPanelProps {
   eventId: string;
   onBackToHome: () => void;
+}
+
+/** One row of the batch upload tracker shown while several files are in flight. */
+type UploadJob = {
+  id: string;
+  name: string;
+  type: "photo" | "video";
+  sizeBytes: number;
+  /** queued → sending bytes → server is processing → finished/failed. */
+  status: "queued" | "uploading" | "processing" | "done" | "error" | "duplicate";
+  percent: number;
+};
+
+function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 1024) return `${bytes || 0} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function MediaSkeletonCard() {
@@ -37,8 +54,20 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
-  const [guestName, setGuestName] = useState("");
-  const [isRegistered, setIsRegistered] = useState(false);
+  const [guestName, setGuestName] = useState(() => {
+    try {
+      return localStorage.getItem(`guest_name_${eventId}`) || "";
+    } catch {
+      return "";
+    }
+  });
+  const [isRegistered, setIsRegistered] = useState(() => {
+    try {
+      return Boolean(localStorage.getItem(`guest_name_${eventId}`));
+    } catch {
+      return false;
+    }
+  });
   const [showInvitation, _setShowInvitation] = useState(false);
 
   const [selectedFilter, setSelectedFilter] = useState<FilterPreset>(FILM_FILTERS[0]);
@@ -46,6 +75,16 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
   const [uploadProgress, setUploadProgress] = useState(false);
   const [uploadStatusMsg, setUploadStatusMsg] = useState("");
   const [uploadPercent, setUploadPercent] = useState(0);
+
+  // Per-file tracker for multi-select uploads. Rendered as a full-screen sheet so
+  // there is always visible motion on screen, even during a long video transfer.
+  const [uploadJobs, setUploadJobs] = useState<UploadJob[]>([]);
+  const [batchActive, setBatchActive] = useState(false);
+
+  // The guest's own uploads, fetched from /my-media so they survive a reload and
+  // are not limited to whatever page of the shared feed happens to be loaded.
+  const [myMedia, setMyMedia] = useState<any[]>([]);
+  const [myMediaLoading, setMyMediaLoading] = useState(false);
 
   const [localFilePreview, setLocalFilePreview] = useState<string | null>(null);
   const [previewFileType, setPreviewFileType] = useState<"photo" | "video" | null>(null);
@@ -109,9 +148,13 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
 
       const storedName = localStorage.getItem(`guest_name_${eventId}`);
       if (storedName) {
-        setGuestName(storedName);
+        const trimmedName = storedName.trim();
+        setGuestName(trimmedName);
         setIsRegistered(true);
-        calculateGuestLimits(storedName, fetchedMedia);
+        calculateGuestLimits(trimmedName, fetchedMedia);
+        // Load the guest's personal uploads immediately so they're visible
+        // on first paint without waiting for the useEffect to fire.
+        loadMyMedia(trimmedName);
       }
     } catch (e) {
       console.error("Failed to load guest room detail.", e);
@@ -151,6 +194,40 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     };
   }, [eventId]);
 
+  /** Loads (or refreshes) this guest's own uploads. */
+  const loadMyMedia = async (name?: string) => {
+    const who = (name ?? guestName).trim();
+    if (!who) {
+      setMyMedia([]);
+      return;
+    }
+    try {
+      setMyMediaLoading(true);
+      const res = await fetch(`/api/events/${eventId}/my-media?guestName=${encodeURIComponent(who)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const mine = data.media || [];
+      setMyMedia(mine);
+
+      // The server is the source of truth for "how many did I send" — keep the
+      // localStorage counters in step so the badges never drift after a reload.
+      const photos = mine.filter((m: any) => m.type !== "video").length;
+      const videos = mine.filter((m: any) => m.type === "video").length;
+      setSnappedCount(photos);
+      setVideoCount(videos);
+      localStorage.setItem(`snapped_${eventId}`, String(photos));
+      localStorage.setItem(`video_${eventId}`, String(videos));
+    } catch (e) {
+      console.error("Failed to load personal uploads.", e);
+    } finally {
+      setMyMediaLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isRegistered && guestName.trim()) loadMyMedia(guestName);
+  }, [isRegistered, guestName, eventId]);
+
   const calculateGuestLimits = (name: string, allMedia: any[]) => {
     const pCount = parseInt(localStorage.getItem(`snapped_${eventId}`) || "0", 10);
     const vCount = parseInt(localStorage.getItem(`video_${eventId}`) || "0", 10);
@@ -163,9 +240,12 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     const finalName = guestName.trim() || `مهمان ناشناس ${Math.floor(100 + Math.random() * 900)}`;
     setGuestName(finalName);
     localStorage.setItem(`guest_name_${eventId}`, finalName);
-    
+
     setIsRegistered(true);
     calculateGuestLimits(finalName, mediaItems);
+    // Immediately load their uploads so the "my uploads" section isn't empty
+    // after registering (especially if they already uploaded before naming themselves).
+    loadMyMedia(finalName);
   };
 
   const handleClearName = () => {
@@ -211,29 +291,9 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     if (files.length === 0) return;
 
     if (files.length > 1) {
-      setPendingFiles(files);
-      setBatchProgress({ current: 0, total: files.length });
-      setUploadProgress(true);
-      setUploadStatusMsg(`در حال بارگذاری ${files.length} فایل...`);
-      let done = 0;
-      for (const file of files) {
-        done++;
-        setBatchProgress({ current: done, total: files.length });
-        setUploadStatusMsg(`در حال بارگذاری فایل ${done} از ${files.length}...`);
-        const isVideo = file.type.startsWith("video");
-        try {
-          await handleStreamingUpload(file, isVideo ? "video" : "photo", isVideo ? 10 : 0);
-        } catch (err) {
-          console.error("Batch upload item failed", err);
-        }
-      }
-      setUploadStatusMsg(`${files.length} فایل با موفقیت ثبت شد!`);
-      setTimeout(() => {
-        setUploadProgress(false);
-        setUploadStatusMsg("");
-        setUploadPercent(0);
-        setPendingFiles([]);
-      }, 2000);
+      // Reset the input immediately so picking the same files again still fires.
+      e.target.value = '';
+      await runBatchUpload(files);
       return;
     }
 
@@ -268,31 +328,38 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     if (!pendingFile || !localFilePreview) return;
 
     setUploadProgress(true);
-    setUploadPercent(10);
+    setUploadPercent(0);
     setUploadStatusMsg("در حال آماده‌سازی فایل...");
 
+    // Real byte progress from XHR, plus a distinct "server is working" message so
+    // a video never sits at 100% with no explanation.
+    const hooks = {
+      onProgress: (p: number) => {
+        setUploadPercent(p);
+        setUploadStatusMsg(previewFileType === "video" ? "در حال ارسال ویدیو..." : "در حال ارسال عکس...");
+      },
+      onProcessing: () => {
+        setUploadPercent(100);
+        setUploadStatusMsg(previewFileType === "video" ? "ارسال شد، در حال پردازش روی سرور..." : "در حال ذخیره‌سازی...");
+      },
+    };
+
     try {
+      let result: "ok" | "duplicate" | "error";
       if (previewFileType === "video") {
-        setUploadStatusMsg("در حال بارگذاری ویدیو...");
-        setUploadPercent(40);
-        await handleStreamingUpload(pendingFile, "video", 10);
+        result = await handleStreamingUpload(pendingFile, "video", 0, hooks);
+      } else if (!selectedFilter.canvasFilter || selectedFilter.id === 'none') {
+        result = await handleStreamingUpload(pendingFile, "photo", 0, hooks);
       } else {
-        if (!selectedFilter.canvasFilter || selectedFilter.id === 'none') {
-           setUploadStatusMsg("در حال بارگذاری عکس اصلی...");
-           setUploadPercent(60);
-           await handleStreamingUpload(pendingFile, "photo");
-        } else {
-           setUploadStatusMsg("در حال اعمال فیلتر تصویر...");
-           setUploadPercent(30);
-           const filteredBase64 = await applyFilterToImage(localFilePreview);
-           setUploadPercent(60);
-           setUploadStatusMsg("در حال بارگذاری عکس...");
-           await handleStreamingUpload(filteredBase64, "photo");
-        }
+        setUploadStatusMsg("در حال اعمال فیلتر تصویر...");
+        const filteredBase64 = await applyFilterToImage(localFilePreview);
+        result = await handleStreamingUpload(filteredBase64, "photo", 0, hooks);
       }
 
+      if (result === "error") throw new Error("upload failed");
+
       setUploadPercent(100);
-      setUploadStatusMsg("با موفقیت ثبت شد!");
+      setUploadStatusMsg(result === "duplicate" ? "این فایل قبلاً ثبت شده بود." : "با موفقیت ثبت شد!");
       setTimeout(() => {
         setUploadProgress(false);
         setUploadStatusMsg("");
@@ -331,10 +398,57 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
     return new Blob([ab], { type: mime });
   }
 
-  const handleStreamingUpload = async (payload: string | Blob | File, type: "photo" | "video", durationSec: number = 0) => {
+  /**
+   * POSTs one file with XHR rather than fetch — fetch gives no upload progress
+   * events, which is exactly what makes a big video look like a frozen page.
+   * `onProgress` receives 0-100 for the bytes actually pushed to the server, and
+   * `onProcessing` fires once the last byte is out and the server takes over.
+   */
+  const uploadWithProgress = (
+    formData: FormData,
+    onProgress?: (percent: number) => void,
+    onProcessing?: () => void
+  ): Promise<{ status: number; body: any }> => {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `/api/events/${eventId}/upload/streaming`);
+
+      xhr.upload.onprogress = (evt) => {
+        if (!evt.lengthComputable) return;
+        // Cap at 99% — the last percent belongs to the server-side response.
+        const pct = Math.min(99, Math.round((evt.loaded / evt.total) * 100));
+        onProgress?.(pct);
+      };
+      xhr.upload.onload = () => onProcessing?.();
+
+      xhr.onload = () => {
+        let body: any = null;
+        try { body = JSON.parse(xhr.responseText); } catch { body = null; }
+        resolve({ status: xhr.status, body });
+      };
+      xhr.onerror = () => reject(new Error("network"));
+      xhr.onabort = () => reject(new Error("aborted"));
+      xhr.send(formData);
+    });
+  };
+
+  const handleStreamingUpload = async (
+    payload: string | Blob | File,
+    type: "photo" | "video",
+    durationSec: number = 0,
+    hooks?: { onProgress?: (p: number) => void; onProcessing?: () => void }
+  ): Promise<"ok" | "duplicate" | "error"> => {
     try {
+      let activeName = guestName.trim();
+      if (!activeName) {
+        activeName = `مهمان ناشناس ${Math.floor(100 + Math.random() * 900)}`;
+        setGuestName(activeName);
+        localStorage.setItem(`guest_name_${eventId}`, activeName);
+        setIsRegistered(true);
+      }
+
       const formData = new FormData();
-      formData.append("guestName", guestName.trim());
+      formData.append("guestName", activeName);
       formData.append("filter", selectedFilter.id);
       formData.append("duration", durationSec.toString());
 
@@ -346,27 +460,25 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
         uploadFile = payload;
       }
 
-      const ext = type === 'video' ? 'mp4' : 'jpg';
-      formData.append("fileData", uploadFile, `media.${ext}`);
+      // Keep the real filename when we have one so the server can sniff the
+      // container properly (a .mov renamed to .mp4 confuses ffmpeg's probe).
+      const fallbackName = `media.${type === 'video' ? 'mp4' : 'jpg'}`;
+      const fileName = (uploadFile instanceof File && uploadFile.name) ? uploadFile.name : fallbackName;
+      formData.append("fileData", uploadFile, fileName);
 
-      const res = await fetch(`/api/events/${eventId}/upload/streaming`, {
-        method: "POST",
-        body: formData
-      });
+      const { status, body } = await uploadWithProgress(formData, hooks?.onProgress, hooks?.onProcessing);
 
-      if (res.status === 409) {
-        const errData = await res.json();
+      if (status === 409) {
         toast.warning("این فایل قبلاً آپلود شده است");
-        return false;
+        return "duplicate";
       }
 
-      if (!res.ok) {
-        const errorData = await res.json();
-        toast.error(errorData.error || "از سقف مجاز ثبت فایل عبور کرده‌اید.");
-        return false;
+      if (status < 200 || status >= 300) {
+        toast.error(body?.error || "از سقف مجاز ثبت فایل عبور کرده‌اید.");
+        return "error";
       }
 
-      const uploadedItem = await res.json();
+      const uploadedItem = body;
 
       if (type === "photo") {
         setSnappedCount(p => {
@@ -382,26 +494,88 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
         });
       }
 
-      if (!lockedFeed) {
-        setMediaItems(prev => [uploadedItem, ...prev]);
+      if (uploadedItem) {
+        if (!lockedFeed) setMediaItems(prev => [uploadedItem, ...prev]);
+        setMyMedia(prev => [uploadedItem, ...prev.filter(m => m.id !== uploadedItem.id)]);
       }
 
-      return true;
+      return "ok";
     } catch (err) {
       console.error(err);
-      toast.error("Submission dropped. Network failed.");
-      return false;
+      toast.error("ارسال ناموفق بود. اتصال شبکه را بررسی کنید.");
+      return "error";
     }
+  };
+
+  /**
+   * Uploads a multi-select batch one file at a time (the server pools its heavy
+   * work, so hammering it in parallel just makes every file slower), while the
+   * tracker sheet reports per-file bytes plus overall progress.
+   * Photos go first: they finish in milliseconds, so the guest sees real results
+   * immediately instead of waiting behind a large video.
+   */
+  const runBatchUpload = async (files: File[]) => {
+    const jobs: UploadJob[] = files.map((file, i) => ({
+      id: `${Date.now()}-${i}-${file.name}`,
+      name: file.name || (file.type.startsWith("video") ? "ویدیو" : "عکس"),
+      type: file.type.startsWith("video") ? "video" : "photo",
+      sizeBytes: file.size,
+      status: "queued",
+      percent: 0,
+    }));
+
+    const order = files
+      .map((file, i) => ({ file, job: jobs[i] }))
+      .sort((a, b) => (a.job.type === b.job.type ? 0 : a.job.type === "photo" ? -1 : 1));
+
+    setUploadJobs(jobs);
+    setBatchActive(true);
+    setPendingFiles(files);
+    setBatchProgress({ current: 0, total: files.length });
+
+    const patch = (id: string, next: Partial<UploadJob>) =>
+      setUploadJobs(prev => prev.map(j => (j.id === id ? { ...j, ...next } : j)));
+
+    let finished = 0;
+    for (const { file, job } of order) {
+      patch(job.id, { status: "uploading", percent: 0 });
+      try {
+        const result = await handleStreamingUpload(
+          file,
+          job.type,
+          0,
+          {
+            onProgress: (p) => patch(job.id, { status: "uploading", percent: p }),
+            onProcessing: () => patch(job.id, { status: "processing", percent: 100 }),
+          }
+        );
+        patch(job.id, {
+          status: result === "ok" ? "done" : result === "duplicate" ? "duplicate" : "error",
+          percent: 100,
+        });
+      } catch (err) {
+        console.error("Batch upload item failed", err);
+        patch(job.id, { status: "error", percent: 100 });
+      }
+      finished++;
+      setBatchProgress({ current: finished, total: files.length });
+    }
+
+    // Reconcile with the server so counters and the personal grid are exact.
+    void loadMyMedia();
+    setPendingFiles([]);
   };
 
   const handleDeleteMedia = async (mediaId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!window.confirm("آیا از حذف این فایل مطمئن هستید؟ (فقط مجاز به حذف فایل‌های خودتان هستید)")) return;
 
-    const itemToDelete = mediaItems.find(m => m.id === mediaId);
+    // The item may live only in the personal list (the shared feed is paginated).
+    const itemToDelete = myMedia.find(m => m.id === mediaId) || mediaItems.find(m => m.id === mediaId);
     if (!itemToDelete) return;
 
     setMediaItems(prev => prev.filter(m => m.id !== mediaId));
+    setMyMedia(prev => prev.filter(m => m.id !== mediaId));
     if (itemToDelete.type === "photo") {
       setSnappedCount(p => Math.max(0, p - 1));
     } else {
@@ -423,18 +597,19 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
       } else {
         setVideoCount(v => { localStorage.setItem(`video_${eventId}`, v.toString()); return v; });
       }
+      toast.success("فایل حذف شد");
     } catch (err: any) {
       console.error(err);
       toast.error("خطا در حذف فایل یا عدم دسترسی: " + err.message);
 
-      setMediaItems(prev => {
-        if (!prev.find(m => m.id === mediaId)) {
-          const restored = [...prev, itemToDelete];
-          restored.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-          return restored;
-        }
-        return prev;
-      });
+      const restoreSorted = (prev: any[]) => {
+        if (prev.find(m => m.id === mediaId)) return prev;
+        const restored = [...prev, itemToDelete];
+        restored.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        return restored;
+      };
+      setMediaItems(restoreSorted);
+      setMyMedia(restoreSorted);
       if (itemToDelete.type === "photo") {
         setSnappedCount(p => p + 1);
       } else {
@@ -582,6 +757,122 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
       </div>
     );
   }
+
+  // ─── BATCH TRACKER FRAGMENTS ─────────────────────────────────────
+  const batchDone = uploadJobs.filter(j => j.status === "done" || j.status === "duplicate").length;
+  const batchFailed = uploadJobs.filter(j => j.status === "error").length;
+  const batchSettled = batchDone + batchFailed;
+  const batchTotal = uploadJobs.length;
+  const batchAllSettled = batchTotal > 0 && batchSettled === batchTotal;
+  // Overall progress counts each file's own byte progress, so the bar keeps
+  // creeping forward even while one large video is mid-transfer.
+  const batchOverall = batchTotal === 0
+    ? 0
+    : Math.round(uploadJobs.reduce((sum, j) => sum + (j.status === "queued" ? 0 : j.percent), 0) / batchTotal);
+  const batchHasVideo = uploadJobs.some(j => j.type === "video");
+
+  const batchTrackerHeader = (
+    <div className="px-5 pt-5 pb-4 border-b border-white/10">
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center shrink-0">
+          {batchAllSettled
+            ? <Check className="w-5 h-5 text-emerald-400" strokeWidth={3} />
+            : <UploadCloud className="w-5 h-5 text-rose-300 animate-pulse" />}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-bold text-white leading-tight">
+            {batchAllSettled ? "بارگذاری تمام شد 🎉" : `در حال بارگذاری ${batchTotal} فایل...`}
+          </h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            {batchAllSettled
+              ? `${batchDone} فایل ثبت شد${batchFailed > 0 ? ` • ${batchFailed} فایل ناموفق` : ""}`
+              : `${batchSettled} از ${batchTotal} کامل شد — صفحه را نبندید`}
+          </p>
+        </div>
+        <span className="text-sm font-mono font-bold text-rose-300 shrink-0" dir="ltr">{batchOverall}%</span>
+      </div>
+
+      <div className="mt-3.5 h-2 bg-white/10 rounded-full overflow-hidden">
+        <motion.div
+          className="progress-bar h-full rounded-full"
+          animate={{ width: `${batchOverall}%` }}
+          transition={{ type: "spring", stiffness: 120, damping: 20 }}
+        />
+      </div>
+
+      {!batchAllSettled && batchHasVideo && (
+        <p className="mt-2.5 text-[10px] text-amber-200/90 bg-amber-500/10 border border-amber-500/20 rounded-lg px-2.5 py-1.5 leading-relaxed">
+          ⏳ ویدیوها حجم بیشتری دارند و کمی بیشتر طول می‌کشند — صفحه فریز نشده، در حال ارسال است.
+        </p>
+      )}
+    </div>
+  );
+
+  const batchTrackerList = (
+    <div className="max-h-[45vh] overflow-y-auto divide-y divide-white/5">
+      {uploadJobs.map(job => (
+        <div key={job.id} className="px-5 py-3 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+            {job.status === "done" ? <Check className="w-4 h-4 text-emerald-400" strokeWidth={3} />
+              : job.status === "duplicate" ? <Check className="w-4 h-4 text-slate-400" />
+              : job.status === "error" ? <X className="w-4 h-4 text-red-400" />
+              : job.status === "processing" ? <Cog className="w-4 h-4 text-amber-300 animate-spin" />
+              : job.type === "video" ? <Film className="w-4 h-4 text-rose-300" />
+              : <Image className="w-4 h-4 text-rose-300" />}
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] text-white truncate" title={job.name}>{job.name}</p>
+              <span className="text-[10px] text-slate-500 font-mono shrink-0" dir="ltr">{formatBytes(job.sizeBytes)}</span>
+            </div>
+            <div className="mt-1.5 h-1.5 bg-white/8 rounded-full overflow-hidden">
+              <motion.div
+                className={`h-full rounded-full ${
+                  job.status === "error" ? "bg-red-500"
+                    : job.status === "done" ? "bg-emerald-500"
+                    : job.status === "duplicate" ? "bg-slate-500"
+                    : job.status === "processing" ? "bg-amber-400"
+                    : "progress-bar"
+                }`}
+                animate={{ width: `${job.percent}%` }}
+                transition={{ duration: 0.2 }}
+              />
+            </div>
+            <p className="text-[9.5px] text-slate-400 mt-1">
+              {job.status === "queued" ? "در نوبت..."
+                : job.status === "uploading" ? `در حال ارسال ${job.percent}%`
+                : job.status === "processing" ? "در حال پردازش روی سرور..."
+                : job.status === "done" ? "ثبت شد ✓"
+                : job.status === "duplicate" ? "تکراری بود — رد شد"
+                : "ناموفق — دوباره تلاش کنید"}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const batchTrackerFooter = (
+    <div className="px-5 py-4 border-t border-white/10">
+      {batchAllSettled ? (
+        <button
+          type="button"
+          id="batch_tracker_close_btn"
+          onClick={() => { setBatchActive(false); setUploadJobs([]); setBatchProgress({ current: 0, total: 0 }); }}
+          className="w-full btn-gradient py-3 rounded-xl text-sm font-bold cursor-pointer flex items-center justify-center gap-2"
+        >
+          <Check className="w-4 h-4" />
+          بستن
+        </button>
+      ) : (
+        <div className="flex items-center justify-center gap-2 text-[11px] text-slate-400">
+          <Loader className="w-3.5 h-3.5 animate-spin text-rose-400" />
+          لطفاً تا پایان بارگذاری صبر کنید
+        </div>
+      )}
+    </div>
+  );
 
   // ─── MAIN RENDER ─────────────────────────────────────────────────
   return (
@@ -782,14 +1073,9 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
                     انتخاب از گالری
                     <input type="file" accept="image/*,video/*" className="hidden" multiple onChange={handleFileChange} />
                   </label>
-                  <label
-                    className="bg-white/10 hover:bg-white/15 border border-white/15 text-white py-2.5 px-4 rounded-xl text-sm font-medium cursor-pointer flex items-center justify-center gap-2"
-                    id="viewfinder_camera_btn"
-                  >
-                    <Camera className="w-4 h-4 text-amber-300" />
-                    دوربین مستقیم
-                    <input type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleFileChange} />
-                  </label>
+                  <p className="text-[10px] text-slate-500 text-center leading-relaxed">
+                    می‌توانید چند فایل را همزمان انتخاب کنید 📎
+                  </p>
                 </div>
                 {/* Guest counter badge */}
                 <div className="absolute top-3 left-3 flex gap-2">
@@ -854,8 +1140,109 @@ export default function GuestPanel({ eventId, onBackToHome }: GuestPanelProps) {
             {selectedFilter.id === 'none' ? 'بدون فیلتر' : `فیلتر "${selectedFilter.name}" انتخاب شده`}
           </p>
         </div>
+
+        {/* ── My Uploads ── */}
+        <div className="px-4 pt-2 pb-6" id="my_uploads_section">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <span>🗂</span>
+              فایل‌های ارسالی من
+              <span className="text-rose-300 font-mono normal-case">({myMedia.length})</span>
+            </h3>
+            <button
+              type="button"
+              id="my_uploads_refresh_btn"
+              onClick={() => loadMyMedia()}
+              aria-label="بروزرسانی فایل‌های من"
+              className="flex items-center gap-1 text-[10px] text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 border border-white/10 px-2.5 py-1 rounded-lg transition-all cursor-pointer"
+            >
+              <RefreshCw className={`w-3 h-3 ${myMediaLoading ? 'animate-spin' : ''}`} />
+              بروزرسانی
+            </button>
+          </div>
+
+          {myMedia.length === 0 ? (
+            <div className="glass-card rounded-2xl border border-white/10 p-6 text-center space-y-1.5">
+              <UploadCloud className="w-8 h-8 text-slate-500 mx-auto stroke-1" />
+              <p className="text-xs text-slate-400">هنوز فایلی ارسال نکرده‌اید</p>
+              <p className="text-[10px] text-slate-500">هر چیزی که بفرستید همین‌جا نمایش داده می‌شود و می‌توانید حذفش کنید.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2.5">
+              <AnimatePresence initial={false}>
+                {myMedia.map((m, idx) => (
+                  <motion.div
+                    key={m.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.85 }}
+                    transition={{ duration: 0.2, delay: Math.min(idx, 8) * 0.02 }}
+                    className="relative group rounded-xl overflow-hidden border border-white/10 bg-black/40 aspect-square"
+                  >
+                    <img
+                      src={m.thumbnailUrl || m.url}
+                      alt={`فایل ارسالی ${idx + 1}`}
+                      loading="lazy"
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                    {m.type === "video" && (
+                      <span className="absolute bottom-1.5 right-1.5 bg-black/70 text-white text-[9px] px-1.5 py-0.5 rounded-md border border-white/10 flex items-center gap-1">
+                        <Film className="w-2.5 h-2.5" />
+                        ویدیو
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteMedia(m.id, e)}
+                      title="حذف این فایل"
+                      aria-label={`حذف فایل ارسالی ${idx + 1}`}
+                      className="absolute top-1.5 left-1.5 bg-black/70 hover:bg-red-500 border border-white/15 text-white p-1.5 rounded-lg transition-all cursor-pointer active:scale-90"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          )}
+        </div>
       </div>
       )}
+
+      {/* ─── BATCH UPLOAD TRACKER ────────────────────
+          Full-screen while several files are in flight. Shows real byte progress
+          per file (XHR) plus a distinct "processing on the server" state, so a
+          large video never reads as a frozen page. */}
+      <AnimatePresence>
+        {batchActive && (
+          <motion.div
+            key="batch-tracker"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-[60] bg-[#160f13]/95 backdrop-blur-xl flex items-end sm:items-center justify-center p-0 sm:p-6"
+            id="batch_upload_tracker"
+            role="dialog"
+            aria-modal="true"
+            aria-label="وضعیت بارگذاری فایل‌ها"
+          >
+            <motion.div
+              initial={{ y: 40, scale: 0.98, opacity: 0 }}
+              animate={{ y: 0, scale: 1, opacity: 1 }}
+              exit={{ y: 30, opacity: 0 }}
+              transition={{ type: "spring", stiffness: 260, damping: 26 }}
+              className="w-full sm:max-w-md glass-card rounded-t-3xl sm:rounded-3xl border border-white/10 shadow-2xl overflow-hidden"
+            >
+              {batchTrackerHeader}
+              {batchTrackerList}
+              {batchTrackerFooter}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ─── LIGHTBOX ────────────────────────────────── */}
       <AnimatePresence>

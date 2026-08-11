@@ -1,10 +1,11 @@
 import React, { useState, useEffect, FormEvent, useMemo, useRef } from "react";
-import { 
-  Plus, QrCode, Clipboard, Check, Trash2, Folder, 
-  Settings, Sparkles, Download, Heart, Eye, Play, 
+import {
+  Plus, QrCode, Clipboard, Check, Trash2, Folder,
+  Settings, Sparkles, Download, Heart, Eye, Play,
   RefreshCw, FileText, Terminal, ArrowLeft, Image, Video, Users, User, Printer, Activity, Share2, X,
-  LogOut, Edit, Calendar,
-  ChevronLeft, ChevronRight, ChevronDown, Upload, CheckSquare, Square
+  LogOut, Edit, Calendar, UserPlus,
+  ChevronLeft, ChevronRight, ChevronDown, Upload, CheckSquare, Square,
+  Gift, CreditCard, MessageSquare, EyeOff, Save, Lock, HardDrive, Cpu
 } from "lucide-react";
 import QRCode from "qrcode";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
@@ -13,6 +14,17 @@ import { toast } from "sonner";
 
 interface AdminPanelProps {
   onBackToHome: () => void;
+}
+
+/** Human-readable size for the storage counters. */
+function formatBytes(bytes: number): string {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let size = value / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit++; }
+  return `${size.toFixed(size >= 10 ? 0 : 1)} ${units[unit]}`;
 }
 
 export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
@@ -68,6 +80,129 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [selectedPeopleForMerge, setSelectedPeopleForMerge] = useState<string[]>([]);
   const [isClearingFaces, setIsClearingFaces] = useState(false);
   const [confirmAction, setConfirmAction] = useState<{ message: string; onConfirm: () => void } | null>(null);
+
+  // VIP Reference Face state
+  const [showVipModal, setShowVipModal] = useState(false);
+  const [vipName, setVipName] = useState("");
+  const [vipFile, setVipFile] = useState<File | null>(null);
+  const [isUploadingVip, setIsUploadingVip] = useState(false);
+
+  // Gift inbox state (admin-only: card details + guest receipts)
+  const [giftCard, setGiftCard] = useState<any>({ enabled: true });
+  const [giftSaving, setGiftSaving] = useState(false);
+  const [giftReceipts, setGiftReceipts] = useState<any[]>([]);
+  const [giftCounts, setGiftCounts] = useState<{ total: number; unseen: number }>({ total: 0, unseen: 0 });
+  const [giftLoading, setGiftLoading] = useState(false);
+  const [giftPreview, setGiftPreview] = useState<any | null>(null);
+
+  const fetchGiftData = async (eventId: string) => {
+    setGiftLoading(true);
+    try {
+      const [cardRes, listRes] = await Promise.all([
+        fetch(`/api/events/${eventId}/gift-card`),
+        fetch(`/api/events/${eventId}/gift-receipts`),
+      ]);
+      if (cardRes.ok) {
+        const card = await cardRes.json();
+        setGiftCard({ enabled: true, ...card });
+      }
+      if (listRes.ok) {
+        const data = await listRes.json();
+        setGiftReceipts(data.items || []);
+        setGiftCounts({ total: data.total || 0, unseen: data.unseen || 0 });
+      }
+    } catch (e) {
+      console.error("Failed to load gift data", e);
+    } finally {
+      setGiftLoading(false);
+    }
+  };
+
+  const saveGiftCard = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedEventId) return;
+    setGiftSaving(true);
+    try {
+      const res = await fetch(`/api/events/${selectedEventId}/gift-card`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(giftCard),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("اطلاعات کارت هدیه ذخیره شد");
+    } catch {
+      toast.error("ذخیره اطلاعات کارت انجام نشد");
+    } finally {
+      setGiftSaving(false);
+    }
+  };
+
+  const toggleReceiptSeen = async (receipt: any) => {
+    if (!selectedEventId) return;
+    const next = !receipt.seen;
+    setGiftReceipts(prev => prev.map(r => (r.id === receipt.id ? { ...r, seen: next } : r)));
+    setGiftCounts(prev => ({ ...prev, unseen: Math.max(0, prev.unseen + (next ? -1 : 1)) }));
+    try {
+      await fetch(`/api/events/${selectedEventId}/gift-receipts/${receipt.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seen: next }),
+      });
+    } catch {
+      toast.error("به‌روزرسانی انجام نشد");
+    }
+  };
+
+  const deleteReceipt = async (receipt: any) => {
+    if (!selectedEventId) return;
+    try {
+      const res = await fetch(`/api/events/${selectedEventId}/gift-receipts/${receipt.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error();
+      setGiftReceipts(prev => prev.filter(r => r.id !== receipt.id));
+      setGiftCounts(prev => ({
+        total: Math.max(0, prev.total - 1),
+        unseen: Math.max(0, prev.unseen - (receipt.seen ? 0 : 1)),
+      }));
+      if (giftPreview?.id === receipt.id) setGiftPreview(null);
+      toast.success("رسید حذف شد");
+    } catch {
+      toast.error("حذف رسید انجام نشد");
+    }
+  };
+
+  const handleUploadVipFace = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedEventId || !vipFile) {
+      toast.error("لطفا تصویر چهره مرجع را انتخاب کنید.");
+      return;
+    }
+    setIsUploadingVip(true);
+    try {
+      const formData = new FormData();
+      formData.append("fileData", vipFile);
+      formData.append("displayName", vipName.trim() || "شخص مهم (VIP)");
+
+      const res = await fetch(`/api/events/${selectedEventId}/vip-faces/upload`, {
+        method: "POST",
+        body: formData
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        toast.success("عکس مرجع VIP با موفقیت ذخیره شد. در حال شناسایی چهره...");
+        setShowVipModal(false);
+        setVipFile(null);
+        setVipName("");
+        await handleSyncFaces();
+      } else {
+        toast.error(data.error || "خطا در آپلود عکس مرجع");
+      }
+    } catch (err: any) {
+      toast.error("خطا در ارتباط با سرور: " + err.message);
+    } finally {
+      setIsUploadingVip(false);
+    }
+  };
 
   const toggleSelectMedia = (id: string) => {
     setSelectedIds(prev => {
@@ -198,15 +333,17 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const handleRenamePerson = async (personId: string, displayName: string) => {
     if (!selectedEventId || !displayName.trim()) return;
     try {
+      // Optimistic update
+      setFaceProfiles(prev => prev.map(p => p.personId === personId ? { ...p, displayName: displayName.trim() } : p));
+      setEditingPersonId(null);
+
       const res = await fetch(`/api/events/${selectedEventId}/face-profiles/${personId}/rename`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ displayName })
+        body: JSON.stringify({ displayName: displayName.trim() })
       });
       if (res.ok) {
-        toast.success("نام با موفقیت تغییر کرد.");
-        setEditingPersonId(null);
-        // Refresh
+        toast.success("نام با موفقیت تغییر کرد ✨");
         const profileRes = await fetch(`/api/events/${selectedEventId}/face-profiles`);
         if (profileRes.ok) {
           const profileData = await profileRes.json();
@@ -286,6 +423,10 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const [localSyncEnabled, setLocalSyncEnabled] = useState(false);
   const [localSyncHost, setLocalSyncHost] = useState("http://localhost:8080");
   const [activeSyncDir, setActiveSyncDir] = useState("D:\\Wedding");
+
+  // Two-tier storage: what is still on the local disk vs. moved to the external drive.
+  const [archiveStatus, setArchiveStatus] = useState<any | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
 
   // System statistics
   const [loading, setLoading] = useState(true);
@@ -424,10 +565,13 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
         setLocalSyncHost(ev.localSyncHost || "http://localhost:8080");
         setActiveSyncDir(ev.saveDirectory || "D:\\Wedding");
         fetchMedia(selectedEventId);
+        fetchGiftData(selectedEventId);
       }
     } else {
       setSelectedEvent(null);
       setMediaItems([]);
+      setGiftReceipts([]);
+      setGiftCounts({ total: 0, unseen: 0 });
     }
   }, [selectedEventId, events]);
 
@@ -448,6 +592,15 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       setQrCodeDataUrl("");
     }
   }, [guestLink]);
+
+  // Poll the tiered-storage counters only while the storage tab is visible, so
+  // the panel doesn't keep hitting the disk in the background all evening.
+  useEffect(() => {
+    if (!isAuthenticated || !selectedEventId || activeTab !== "sync") return;
+    fetchArchiveStatus();
+    const timer = setInterval(fetchArchiveStatus, 15000);
+    return () => clearInterval(timer);
+  }, [isAuthenticated, selectedEventId, activeTab]);
 
   // WebSocket real-time updates
   useEffect(() => {
@@ -473,7 +626,12 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               setMediaItems(prev => [msg.data.media, ...prev]);
             } else if (msg.type === 'media:liked' && msg.data.eventId === selectedEventId) {
               if (msg.data.media) {
-                setMediaItems(prev => prev.map(m => m.id === msg.data.mediaId ? { ...m, ...msg.data.midia } : m));
+                setMediaItems(prev => prev.map(m => m.id === msg.data.media.id ? { ...m, ...msg.data.media } : m));
+              }
+            } else if (msg.type === 'media:updated' && msg.data.eventId === selectedEventId) {
+              // Background video re-encode landed — refresh that row in place.
+              if (msg.data.media) {
+                setMediaItems(prev => prev.map(m => m.id === msg.data.media.id ? { ...m, ...msg.data.media } : m));
               }
             } else if (msg.type === 'media:deleted' && msg.data.eventId === selectedEventId) {
               setMediaItems(prev => prev.filter(m => m.id !== msg.data.mediaId));
@@ -571,6 +729,33 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
       setEvents(prev => prev.map(e => e.id === selectedEventId ? { ...e, ...data } : e));
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  /** Pulls the tiered-storage counters (local vs. archived) for the storage card. */
+  const fetchArchiveStatus = async () => {
+    if (!selectedEventId) return;
+    try {
+      const res = await fetch(`/api/events/${selectedEventId}/archive-status`);
+      if (!res.ok) return;
+      setArchiveStatus(await res.json());
+    } catch { /* transient — the card just keeps the previous numbers */ }
+  };
+
+  const handleArchiveNow = async () => {
+    if (!selectedEventId) return;
+    setIsArchiving(true);
+    try {
+      const res = await fetch(`/api/events/${selectedEventId}/archive-now`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || "خطا در انتقال فایل‌ها");
+      if (data.moved > 0) toast.success(`${data.moved} فایل به درایو خارجی منتقل شد.`);
+      else toast.info(data.reason || data.lastPass || "چیزی برای انتقال نبود.");
+      await fetchArchiveStatus();
+    } catch (err: any) {
+      toast.error(err?.message || "انتقال انجام نشد.");
+    } finally {
+      setIsArchiving(false);
     }
   };
 
@@ -942,6 +1127,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                   { id: "media", label: "رسانه‌ها", icon: Image, count: mediaItems.length },
                   { id: "analytics", label: "تحلیل‌ها", icon: BarChart },
                   { id: "faces", label: "شناسایی چهره", icon: User, badge: faceProfiles.length },
+                  { id: "gifts", label: "هدیه‌ها", icon: Gift, badge: giftCounts.total },
                   { id: "sync", label: "همگام‌سازی", icon: RefreshCw },
                   { id: "settings", label: "تنظیمات", icon: Settings },
                 ].map(tab => (
@@ -1146,6 +1332,13 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                         <span className="text-sm font-mono text-amber-300 w-10">{faceTolerance.toFixed(2)}</span>
                       </div>
                       <button
+                        onClick={() => setShowVipModal(true)}
+                        className="px-4 py-2 bg-teal-600/80 hover:bg-teal-500 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer shadow-lg flex items-center gap-2 border border-teal-500/30"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        <span className="font-vazir">آپلود عکس دسته‌جمعی / مرجع (مخفی)</span>
+                      </button>
+                      <button
                         onClick={handleSyncFaces}
                         disabled={isSyncingFaces}
                         className="px-4 py-2 bg-gradient-to-r from-amber-500 to-rose-500 hover:from-amber-400 hover:to-rose-400 text-white text-sm font-semibold rounded-xl transition-all cursor-pointer shadow-lg disabled:opacity-50 flex items-center gap-2"
@@ -1164,6 +1357,65 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                     </div>
                   </div>
 
+                  {/* VIP Reference Face Modal */}
+                  {showVipModal && (
+                    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                      <div className="bg-slate-900 border border-slate-700 rounded-3xl p-6 w-full max-w-md space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                          <h3 className="text-lg font-bold text-white font-vazir flex items-center gap-2">
+                            <UserPlus className="w-5 h-5 text-teal-400" />
+                            آپلود عکس دسته‌جمعی / چهره‌های مرجع
+                          </h3>
+                          <button onClick={() => setShowVipModal(false)} className="p-1 rounded-lg text-slate-400 hover:text-white">
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+                        <p className="text-xs text-slate-400 font-vazir leading-relaxed">
+                          عکس‌های دسته‌جمعی یا چهره‌هایی که آپلود می‌کنید برای شناسایی چهره دوستانتان استفاده شده و <strong className="text-amber-400">در آلبوم عمومی به مهمانان نشان داده نخواهد شد</strong>.
+                        </p>
+                        <form onSubmit={handleUploadVipFace} className="space-y-4 pt-2">
+                          <div>
+                            <label className="block text-xs text-slate-400 font-vazir mb-1">نام یا عنوان اولیه (اختیاری)</label>
+                            <input
+                              type="text"
+                              value={vipName}
+                              onChange={(e) => setVipName(e.target.value)}
+                              placeholder="مثال: عکس دسته‌جمعی دوستان / علی"
+                              className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-teal-500/50 font-vazir"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-slate-400 font-vazir mb-1">انتخاب عکس دسته‌جمعی یا مرجع *</label>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              onChange={(e) => setVipFile(e.target.files?.[0] || null)}
+                              className="w-full text-xs text-slate-400 bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 cursor-pointer focus:outline-none"
+                              required
+                            />
+                          </div>
+                          <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+                            <button
+                              type="button"
+                              onClick={() => setShowVipModal(false)}
+                              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-vazir"
+                            >
+                              انصراف
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={isUploadingVip}
+                              className="px-5 py-2 rounded-xl bg-teal-600 hover:bg-teal-500 text-white font-semibold text-sm font-vazir flex items-center gap-2 disabled:opacity-50"
+                            >
+                              {isUploadingVip ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                              آپلود و شناسایی چهره‌ها
+                            </button>
+                          </div>
+                        </form>
+                      </div>
+                    </div>
+                  )}
+
                   {faceProfiles.length === 0 ? (
                     <div className="text-center py-20 bg-slate-900/50 rounded-2xl border border-slate-800/50">
                       <User className="w-16 h-16 mx-auto text-slate-600 mb-4" />
@@ -1178,6 +1430,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                           profile={profile}
                           editing={editingPersonId === profile.personId}
                           editName={editingName}
+                          onEditNameChange={(val: string) => setEditingName(val)}
                           onEditClick={() => { setEditingPersonId(profile.personId); setEditingName(profile.displayName || `شخص ${profile.personId.slice(0,6)}`); }}
                           onSaveClick={() => handleRenamePerson(profile.personId, editingName)}
                           onCancelClick={() => { setEditingPersonId(null); setEditingName(""); }}
@@ -1204,6 +1457,223 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                         >
                           لغو
                         </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Gifts Tab — private inbox, never exposed to guests */}
+              {activeTab === "gifts" && (
+                <div className="space-y-6">
+                  <div className="bg-gradient-to-br from-amber-500/10 via-slate-900/50 to-slate-900/50 rounded-2xl border border-amber-500/20 p-6">
+                    <div className="flex items-center gap-2 mb-1">
+                      <Lock className="w-4 h-4 text-amber-300" />
+                      <h3 className="text-lg font-semibold text-white font-vazir">اطلاعات کارت هدیه</h3>
+                    </div>
+                    <p className="text-sm text-slate-400 font-vazir mb-6">
+                      این اطلاعات در صفحه هدیه به مهمانان نشان داده می‌شود. رسیدهای ارسالی فقط در همین صفحه قابل مشاهده است.
+                    </p>
+
+                    <form onSubmit={saveGiftCard} className="space-y-4">
+                      <label className="flex items-center justify-between bg-slate-900/60 rounded-xl border border-slate-800/60 px-4 py-3 cursor-pointer">
+                        <span className="text-white font-vazir text-sm">نمایش صفحه هدیه برای مهمانان</span>
+                        <input
+                          type="checkbox"
+                          checked={giftCard.enabled !== false}
+                          onChange={(e) => setGiftCard((c: any) => ({ ...c, enabled: e.target.checked }))}
+                          className="w-4 h-4 accent-amber-500"
+                        />
+                      </label>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {[
+                          { key: "title", label: "عنوان صفحه", placeholder: "هدیه به عروس و داماد" },
+                          { key: "bankName", label: "نام بانک", placeholder: "بانک ..." },
+                          { key: "cardNumber", label: "شماره کارت", placeholder: "6037 xxxx xxxx xxxx", mono: true },
+                          { key: "iban", label: "شماره شبا", placeholder: "IR...", mono: true },
+                          { key: "cardHolder", label: "نام صاحب کارت", placeholder: "نام و نام خانوادگی" },
+                        ].map(f => (
+                          <div key={f.key}>
+                            <label className="block text-xs text-slate-400 font-vazir mb-1.5">{f.label}</label>
+                            <input
+                              type="text"
+                              value={giftCard[f.key] || ""}
+                              onChange={(e) => setGiftCard((c: any) => ({ ...c, [f.key]: e.target.value }))}
+                              placeholder={f.placeholder}
+                              dir={f.mono ? "ltr" : "rtl"}
+                              className={`w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white outline-none focus:border-amber-500/60 transition-colors ${f.mono ? "font-mono tracking-wider" : "font-vazir"}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-slate-400 font-vazir mb-1.5">
+                          متن معرفی <span className="text-slate-500">(خط اول تیتر می‌شود — خالی بگذارید تا متن پیش‌فرض نمایش داده شود)</span>
+                        </label>
+                        <textarea
+                          rows={7}
+                          value={giftCard.intro || ""}
+                          onChange={(e) => setGiftCard((c: any) => ({ ...c, intro: e.target.value }))}
+                          placeholder="همین که خودتون تشریف آوردین برای ما هدیه بزرگیه 😀😀"
+                          className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white font-vazir outline-none focus:border-amber-500/60 resize-y leading-relaxed"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs text-slate-400 font-vazir mb-1.5">یادداشت پایین کارت</label>
+                        <input
+                          type="text"
+                          value={giftCard.note || ""}
+                          onChange={(e) => setGiftCard((c: any) => ({ ...c, note: e.target.value }))}
+                          className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm text-white font-vazir outline-none focus:border-amber-500/60"
+                        />
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="submit"
+                          disabled={giftSaving}
+                          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-60 text-slate-900 font-bold rounded-xl transition-all font-vazir text-sm flex items-center gap-2"
+                        >
+                          <Save className="w-4 h-4" />
+                          {giftSaving ? "در حال ذخیره..." : "ذخیره اطلاعات کارت"}
+                        </button>
+                        <a
+                          href={`#/gift/${selectedEventId}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="px-4 py-2.5 bg-slate-800/60 hover:bg-slate-700/60 text-slate-300 hover:text-white rounded-xl transition-all font-vazir text-sm flex items-center gap-2 border border-slate-700/50"
+                        >
+                          <Eye className="w-4 h-4" />
+                          مشاهده صفحه هدیه
+                        </a>
+                      </div>
+                    </form>
+                  </div>
+
+                  <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6">
+                    <div className="flex items-center justify-between mb-5">
+                      <div className="flex items-center gap-2">
+                        <MessageSquare className="w-4 h-4 text-rose-300" />
+                        <h3 className="text-lg font-semibold text-white font-vazir">رسیدهای دریافتی</h3>
+                        {giftCounts.unseen > 0 && (
+                          <span className="px-2 py-0.5 text-xs rounded-full bg-rose-500/20 text-rose-300 font-mono">
+                            {giftCounts.unseen} جدید
+                          </span>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => selectedEventId && fetchGiftData(selectedEventId)}
+                        className="p-2 bg-slate-800/60 hover:bg-slate-700/60 rounded-xl text-slate-300 transition-all"
+                        title="بازآوری"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${giftLoading ? "animate-spin" : ""}`} />
+                      </button>
+                    </div>
+
+                    {giftReceipts.length === 0 ? (
+                      <div className="text-center py-14 text-slate-500">
+                        <Gift className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                        <p className="font-vazir text-sm">هنوز رسیدی ارسال نشده است.</p>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        {giftReceipts.map(r => (
+                          <div
+                            key={r.id}
+                            className={`rounded-2xl border overflow-hidden transition-all ${
+                              r.seen ? "border-slate-800/60 bg-slate-950/40" : "border-amber-500/40 bg-amber-500/5"
+                            }`}
+                          >
+                            {r.imageUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => setGiftPreview(r)}
+                                className="block w-full aspect-[4/3] bg-slate-900 overflow-hidden group"
+                              >
+                                <img
+                                  src={r.imageUrl}
+                                  alt={`رسید ${r.senderName}`}
+                                  loading="lazy"
+                                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                                />
+                              </button>
+                            ) : (
+                              <div className="aspect-[4/3] bg-slate-900/60 flex items-center justify-center">
+                                <MessageSquare className="w-8 h-8 text-slate-700" />
+                              </div>
+                            )}
+                            <div className="p-4 space-y-2">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-sm font-bold text-white font-vazir truncate">{r.senderName}</span>
+                                {r.amount && (
+                                  <span className="text-[11px] font-mono text-amber-300 shrink-0">{r.amount}</span>
+                                )}
+                              </div>
+                              {r.message && (
+                                <p className="text-xs text-slate-300 font-vazir leading-relaxed line-clamp-3">{r.message}</p>
+                              )}
+                              <div className="flex items-center justify-between pt-1">
+                                <span className="text-[10px] text-slate-500 font-mono">
+                                  {r.timestamp ? new Date(r.timestamp).toLocaleString("fa-IR", { dateStyle: "short", timeStyle: "short" }) : ""}
+                                </span>
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => toggleReceiptSeen(r)}
+                                    title={r.seen ? "علامت‌گذاری به عنوان خوانده‌نشده" : "علامت‌گذاری به عنوان خوانده‌شده"}
+                                    className="p-1.5 rounded-lg bg-slate-800/60 hover:bg-slate-700/60 text-slate-300 transition-all"
+                                  >
+                                    {r.seen ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                  </button>
+                                  <button
+                                    onClick={() => setConfirmAction({
+                                      message: `رسید «${r.senderName}» حذف شود؟`,
+                                      onConfirm: () => deleteReceipt(r),
+                                    })}
+                                    title="حذف"
+                                    className="p-1.5 rounded-lg bg-red-500/15 hover:bg-red-500/30 text-red-300 transition-all"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {giftPreview?.imageUrl && (
+                    <div
+                      className="fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex items-center justify-center p-6"
+                      onClick={() => setGiftPreview(null)}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setGiftPreview(null)}
+                        className="absolute top-5 left-5 p-2.5 bg-white/10 hover:bg-white/20 rounded-xl text-white"
+                        aria-label="بستن"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                      <div className="max-w-3xl w-full space-y-3" onClick={e => e.stopPropagation()}>
+                        <img
+                          src={giftPreview.imageUrl}
+                          alt={`رسید ${giftPreview.senderName}`}
+                          className="w-full max-h-[75vh] object-contain rounded-2xl border border-white/10"
+                        />
+                        <div className="bg-slate-900/80 rounded-2xl border border-slate-800 p-4">
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-sm font-bold text-white font-vazir">{giftPreview.senderName}</span>
+                            {giftPreview.amount && <span className="text-xs font-mono text-amber-300">{giftPreview.amount}</span>}
+                          </div>
+                          {giftPreview.message && (
+                            <p className="text-xs text-slate-300 font-vazir leading-relaxed">{giftPreview.message}</p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}
@@ -1263,6 +1733,84 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
                         />
                       </div>
                     </div>
+                  </div>
+
+                  <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                          <HardDrive className="w-5 h-5 text-amber-300" />
+                        </div>
+                        <div>
+                          <h3 className="text-lg font-semibold text-white font-vazir">ذخیره‌سازی دو مرحله‌ای</h3>
+                          <p className="text-xs text-slate-400 font-vazir">
+                            فایل‌ها اول روی دیسک داخلی ذخیره می‌شوند و در زمان بیکاری سیستم به درایو خارجی منتقل می‌شوند.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handleArchiveNow}
+                        disabled={isArchiving || !archiveStatus?.enabled}
+                        className="px-4 py-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/60 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 border border-slate-700/50 flex items-center gap-2 transition-all cursor-pointer"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${isArchiving ? "animate-spin" : ""}`} />
+                        <span className="font-vazir text-sm">{isArchiving ? "در حال انتقال..." : "انتقال همین حالا"}</span>
+                      </button>
+                    </div>
+
+                    {!archiveStatus ? (
+                      <p className="text-sm text-slate-500 font-vazir">در حال دریافت وضعیت...</p>
+                    ) : (
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/40">
+                            <p className="text-[11px] text-slate-400 font-vazir mb-1">کل فایل‌ها</p>
+                            <p className="text-xl font-bold text-white">{archiveStatus.total}</p>
+                          </div>
+                          <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/40">
+                            <p className="text-[11px] text-slate-400 font-vazir mb-1">روی دیسک داخلی</p>
+                            <p className="text-xl font-bold text-amber-300">{archiveStatus.pending}</p>
+                            <p className="text-[10px] text-slate-500 font-mono">{formatBytes(archiveStatus.pendingBytes)}</p>
+                          </div>
+                          <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/40">
+                            <p className="text-[11px] text-slate-400 font-vazir mb-1">منتقل‌شده</p>
+                            <p className="text-xl font-bold text-emerald-300">{archiveStatus.archived}</p>
+                            <p className="text-[10px] text-slate-500 font-mono">{formatBytes(archiveStatus.archivedBytes)}</p>
+                          </div>
+                          <div className="bg-slate-800/40 rounded-xl p-3 border border-slate-700/40">
+                            <p className="text-[11px] text-slate-400 font-vazir mb-1">بار پردازنده</p>
+                            <p className="text-xl font-bold text-white flex items-center gap-1">
+                              <Cpu className="w-4 h-4 text-slate-400" />
+                              {archiveStatus.cpuBusyPercent}%
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-vazir">
+                          <span className={`px-2.5 py-1 rounded-full border ${archiveStatus.enabled ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-slate-700/30 text-slate-400 border-slate-600/40"}`}>
+                            {archiveStatus.enabled ? "آرشیو فعال" : "آرشیو خاموش"}
+                          </span>
+                          <span className={`px-2.5 py-1 rounded-full border ${archiveStatus.archiveMounted ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/30" : "bg-rose-500/10 text-rose-300 border-rose-500/30"}`}>
+                            {archiveStatus.archiveMounted ? "درایو خارجی متصل است" : "درایو خارجی متصل نیست"}
+                          </span>
+                          <span className={`px-2.5 py-1 rounded-full border ${archiveStatus.idle ? "bg-sky-500/10 text-sky-300 border-sky-500/30" : "bg-amber-500/10 text-amber-300 border-amber-500/30"}`}>
+                            {archiveStatus.idle ? "سیستم بیکار است" : `مشغول: ${archiveStatus.idleReason}`}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-500 font-mono break-all space-y-1">
+                          <p>مسیر اول: {archiveStatus.primaryRoot || "—"}</p>
+                          <p>مسیر آرشیو: {archiveStatus.archiveRoot}</p>
+                          <p>آخرین اجرا: {archiveStatus.lastPass}</p>
+                        </div>
+
+                        {!archiveStatus.archiveMounted && archiveStatus.enabled && (
+                          <p className="text-xs text-rose-300/90 font-vazir leading-relaxed">
+                            تا وقتی درایو خارجی وصل نشده، همه فایل‌ها سالم روی دیسک داخلی می‌مانند و به‌محض اتصال، خودکار منتقل می‌شوند.
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="bg-slate-900/50 rounded-2xl border border-slate-800/50 p-6">
@@ -1749,12 +2297,11 @@ const FaceProfileCard = ({
 }: any) => {
   const faceCount = profile.faceCount || 0;
   const displayName = profile.displayName || `شخص ${profile.personId.slice(0,6)}`;
-  
   const avatarSrc = profile.representativeImage || profile.avatarUrl;
   
   return (
     <div className={`bg-slate-900/50 rounded-2xl border overflow-hidden transition-all ${isSelectedForMerge ? 'ring-2 ring-amber-400 bg-amber-500/10' : 'border-slate-800/50 hover:border-amber-500/30'}`}>
-      <div className="aspect-square relative overflow-hidden bg-slate-800 flex items-center justify-center">
+      <div className="aspect-square relative overflow-hidden bg-slate-800 flex items-center justify-center group/card">
         {avatarSrc ? (
           <img
             src={avatarSrc}
@@ -1771,7 +2318,7 @@ const FaceProfileCard = ({
           {!editing && (
             <button
               onClick={(e) => { e.stopPropagation(); onEditClick(); }}
-              className="p-1.5 rounded-lg bg-black/50 hover:bg-black/70 text-white/80 hover:text-white transition-all"
+              className="p-1.5 rounded-lg bg-black/60 hover:bg-amber-500 text-white transition-all shadow-md cursor-pointer"
               title="ویرایش نام"
             >
               <Edit className="w-4 h-4" />
@@ -1779,7 +2326,7 @@ const FaceProfileCard = ({
           )}
           <button
             onClick={(e) => { e.stopPropagation(); onDeleteClick(); }}
-            className="p-1.5 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 hover:text-red-200 transition-all"
+            className="p-1.5 rounded-lg bg-red-500/30 hover:bg-red-500 text-red-100 transition-all shadow-md cursor-pointer"
             title="حذف پروفایل"
           >
             <Trash2 className="w-4 h-4" />
@@ -1788,7 +2335,7 @@ const FaceProfileCard = ({
         {canMerge && !isSelectedForMerge && (
           <button
             onClick={(e) => { e.stopPropagation(); onMergeInto(); }}
-            className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 bg-amber-500 hover:bg-amber-400 text-white text-xs font-vazir rounded-full transition-all"
+            className="absolute bottom-2 left-1/2 -translate-x-1/2 px-3 py-1 bg-amber-500 hover:bg-amber-400 text-white text-xs font-vazir rounded-full transition-all shadow-lg"
           >
             ادغام در انتخاب شده
           </button>
@@ -1796,32 +2343,44 @@ const FaceProfileCard = ({
       </div>
       <div className="p-4">
         {editing ? (
-          <div className="flex gap-2">
+          <div className="flex items-center gap-1.5">
             <input
               type="text"
               value={editName}
               onChange={(e) => onEditNameChange?.(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && onSaveClick()}
-              onBlur={onSaveClick}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onSaveClick();
+                if (e.key === 'Escape') onCancelClick();
+              }}
               autoFocus
-              className="flex-1 bg-slate-800/50 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-vazir focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+              placeholder="نام شخص..."
+              className="flex-1 bg-slate-800 border border-amber-500/60 rounded-xl px-3 py-1.5 text-white text-sm font-vazir focus:outline-none focus:ring-2 focus:ring-amber-500/50"
             />
-            <button onClick={onSaveClick} className="p-2 rounded-lg bg-green-500/20 hover:bg-green-500/30 text-green-300 transition-all" title="ذخیره"><Check className="w-4 h-4" /></button>
-            <button onClick={onCancelClick} className="p-2 rounded-lg bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 transition-all" title="انصراف"><X className="w-4 h-4" /></button>
+            <button onClick={(e) => { e.stopPropagation(); onSaveClick(); }} className="p-2 rounded-xl bg-green-500/30 hover:bg-green-500/50 text-green-200 transition-all cursor-pointer shrink-0" title="ذخیره"><Check className="w-4 h-4" /></button>
+            <button onClick={(e) => { e.stopPropagation(); onCancelClick(); }} className="p-2 rounded-xl bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 transition-all cursor-pointer shrink-0" title="انصراف"><X className="w-4 h-4" /></button>
           </div>
         ) : (
-          <>
-            <h4 className="text-white font-medium font-vazir truncate mb-1">{displayName}</h4>
+          <div>
+            <div 
+              onClick={onEditClick}
+              className="flex items-center justify-between group/title cursor-pointer py-0.5 mb-1"
+              title="برای تغییر نام کلیک کنید"
+            >
+              <h4 className="text-white font-bold font-vazir truncate text-base group-hover/title:text-amber-400 transition-colors">
+                {displayName}
+              </h4>
+              <Edit className="w-3.5 h-3.5 text-slate-500 group-hover/title:text-amber-400 transition-colors shrink-0" />
+            </div>
             <div className="flex items-center justify-between text-xs text-slate-400 font-vazir">
-              <span>{faceCount} چهره</span>
+              <span>{faceCount} تصویر مرتبط</span>
               <button
                 onClick={(e) => { e.stopPropagation(); onMergeClick(); }}
-                className={`px-2 py-1 rounded-full text-xs transition-all ${isSelectedForMerge ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800/50 text-slate-400 hover:text-white'}`}
+                className={`px-2.5 py-0.5 rounded-full text-xs transition-all ${isSelectedForMerge ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50 font-bold' : 'bg-slate-800/60 text-slate-400 hover:text-white border border-slate-700/50'}`}
               >
                 {isSelectedForMerge ? '✓ انتخاب شده' : 'ادغام'}
               </button>
             </div>
-          </>
+          </div>
         )}
       </div>
     </div>

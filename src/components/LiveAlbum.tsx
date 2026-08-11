@@ -1,12 +1,12 @@
 // @ts-nocheck
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   ArrowLeft, Download, Image, Loader, X, Video,
-  CheckSquare, Square as SquareIcon, Filter,
+  CheckSquare, Square as SquareIcon,
   DownloadCloud, Search, User, Heart, Calendar,
-  Sparkles, Users
+  Sparkles, Users, LayoutGrid, Grid, Film, Palette,
+  Maximize2, Share2, ChevronLeft, ChevronRight
 } from "lucide-react";
-import { FILM_FILTERS } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import { toast } from "sonner";
 
@@ -15,8 +15,10 @@ interface LiveAlbumProps {
   onBackToHome: () => void;
 }
 
-type GroupTab = "all" | "filter" | "faces";
+type GroupTab = "all" | "faces";
 type FilterType = "all" | "photos" | "videos" | "most-liked";
+type ViewMode = "scatter" | "grid";
+type ThemeSkin = "velvet" | "golden" | "emerald";
 
 export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
   const [mediaItems, setMediaItems] = useState<any[]>([]);
@@ -27,12 +29,15 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
 
-  const [filterTab, setFilterTab] = useState("all");
   const [searchGuest, setSearchGuest] = useState("");
   const [contentFilter, setContentFilter] = useState<FilterType>("all");
+  const [viewMode, setViewMode] = useState<ViewMode>("scatter");
+  const [themeSkin, setThemeSkin] = useState<ThemeSkin>("velvet");
 
   const [faceProfiles, setFaceProfiles] = useState<any[]>([]);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [likesMap, setLikesMap] = useState<Record<string, number>>({});
+  const [popHeartId, setPopHeartId] = useState<string | null>(null);
   const prevMediaCount = useRef(0);
 
   const loadFaceProfiles = useCallback(async () => {
@@ -54,10 +59,14 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
       if (evRes.ok) {
         const ev = await evRes.json();
         setEventName(ev.name || eventId);
+        if (typeof ev.mediaCount === "number") prevMediaCount.current = ev.mediaCount;
       }
       const res = await fetch(`/api/events/${eventId}/media?limit=500&offset=0`);
       const data = await res.json();
-      setMediaItems(data.media || []);
+      const items = data.media || [];
+      setMediaItems(items);
+      // Seed the like counts from the server so hearts survive a reload.
+      setLikesMap(Object.fromEntries(items.map((m: any) => [m.id, m.likes || 0])));
       await loadFaceProfiles();
     } catch (e) {
       console.error("Failed to load album", e);
@@ -70,41 +79,70 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     loadMedia();
   }, [loadMedia]);
 
-  // Poll for new uploads every 30 seconds, show toast notification when new items appear
+  // Live updates over the websocket the server already broadcasts on, with a
+  // slow poll as a fallback for proxies that drop the upgrade.
   useEffect(() => {
-    const poll = async () => {
+    let socket: WebSocket | null = null;
+    let retry: any = null;
+    let closed = false;
+
+    const connect = () => {
       try {
-        const res = await fetch(`/api/events/${eventId}/media?limit=1&offset=0`);
-        if (res.ok) {
-          const data = await res.json();
-          const newCount = data.media?.length || 0;
-          const prev = prevMediaCount.current;
-          if (prev > 0 && newCount > prev) {
-            const diff = newCount - prev;
-            toast.success(`${diff} عکس/ویدیوی جدید آپلود شد!`, {
-              duration: 4000,
-            });
-            // Refresh the full list
-            loadMedia();
-          }
-          prevMediaCount.current = newCount;
-        }
+        const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+        socket = new WebSocket(`${proto}//${window.location.host}`);
+        socket.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg?.data?.eventId && msg.data.eventId !== eventId) return;
+            if (msg.type === "media:uploaded" && msg.data?.media) {
+              setMediaItems((prev) => (prev.some((m) => m.id === msg.data.media.id) ? prev : [msg.data.media, ...prev]));
+              prevMediaCount.current += 1;
+              toast.success("عکس جدیدی به آلبوم اضافه شد!", { duration: 3000 });
+            } else if (msg.type === "media:deleted" && msg.data?.mediaId) {
+              setMediaItems((prev) => prev.filter((m) => m.id !== msg.data.mediaId));
+            } else if (msg.type === "media:updated" && msg.data?.media) {
+              // A video finished its background re-encode: swap in the new URL
+              // in place, without re-announcing it as a new upload.
+              setMediaItems((prev) => prev.map((m) => (m.id === msg.data.media.id ? { ...m, ...msg.data.media } : m)));
+            } else if (msg.type === "media:liked" && msg.data?.media) {
+              setLikesMap((prev) => ({ ...prev, [msg.data.media.id]: msg.data.media.likes || 0 }));
+            }
+          } catch {}
+        };
+        socket.onclose = () => {
+          if (!closed) retry = setTimeout(connect, 8000);
+        };
       } catch {}
     };
-    // Set initial count after first load
-    const init = setTimeout(() => {
-      prevMediaCount.current = mediaItems.length;
-    }, 2000);
-    const interval = setInterval(poll, 30000);
-    return () => {
-      clearInterval(interval);
-      clearTimeout(init);
-    };
-  }, [eventId, loadMedia, mediaItems.length]);
+    connect();
 
-  const photos = mediaItems.filter(m => m.type !== "video");
-  const allFilters = [...new Set(mediaItems.map(m => m.filter))];
-  const allGuests: string[] = [...new Set(mediaItems.map(m => m.guestName).filter(Boolean) as string[])];
+    const poll = setInterval(async () => {
+      if (socket && socket.readyState === WebSocket.OPEN) return;
+      try {
+        const res = await fetch(`/api/events/${eventId}`);
+        if (!res.ok) return;
+        const ev = await res.json();
+        if (typeof ev.mediaCount === "number" && ev.mediaCount > prevMediaCount.current) {
+          const diff = ev.mediaCount - prevMediaCount.current;
+          toast.success(`${diff} عکس/ویدیوی جدید آپلود شد!`, { duration: 4000 });
+          loadMedia();
+        }
+      } catch {}
+    }, 30000);
+
+    return () => {
+      closed = true;
+      clearInterval(poll);
+      if (retry) clearTimeout(retry);
+      socket?.close();
+    };
+  }, [eventId, loadMedia]);
+
+  const photos = useMemo(() => mediaItems.filter(m => m.type !== "video"), [mediaItems]);
+  const allGuests: string[] = useMemo(
+    () => [...new Set(mediaItems.map(m => m.guestName).filter(Boolean) as string[])],
+    [mediaItems]
+  );
 
   const getExt = (m: any) => {
     if (!m.url) return "jpg";
@@ -166,20 +204,41 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     setSelectedIds(new Set());
   };
 
-  const getDisplayedItems = () => {
-    let items = mediaItems;
-    if (currentGroupTab === "filter") {
-      items = filterTab === "all" ? mediaItems : mediaItems.filter(m => m.filter === filterTab);
-    } else if (currentGroupTab === "faces") {
-      if (selectedPersonId) {
-        const p = faceProfiles.find(fp => fp.personId === selectedPersonId);
-        if (p && p.photoNames && p.photoNames.length > 0) {
-          items = items.filter(m => {
-            if (!m.url) return false;
-            const fileName = m.url.split('/').pop() || '';
-            return p.photoNames.some((pName: string) => fileName.includes(pName) || pName.includes(fileName));
-          });
+  const handleToggleLike = async (mId: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setPopHeartId(mId);
+    setTimeout(() => setPopHeartId(null), 900);
+    // Optimistic bump, then persist so likes survive reloads and reach other guests.
+    setLikesMap(prev => ({ ...prev, [mId]: (prev[mId] || 0) + 1 }));
+    try {
+      const res = await fetch(`/api/events/${eventId}/media/${mId}/like`, { method: "POST" });
+      if (res.ok) {
+        const media = await res.json();
+        if (media && typeof media.likes === "number") {
+          setLikesMap(prev => ({ ...prev, [mId]: media.likes }));
         }
+      }
+    } catch {
+      // Keep the optimistic value; a refresh will reconcile it.
+    }
+  };
+
+  const getThemeSkinClass = () => {
+    if (themeSkin === "golden") return "theme-golden";
+    if (themeSkin === "emerald") return "theme-emerald";
+    return "theme-velvet";
+  };
+
+  const displayedItems = useMemo(() => {
+    let items = mediaItems;
+    if (currentGroupTab === "faces" && selectedPersonId) {
+      const p = faceProfiles.find(fp => fp.personId === selectedPersonId);
+      if (p && p.photoNames && p.photoNames.length > 0) {
+        items = items.filter(m => {
+          if (!m.url) return false;
+          const fileName = m.url.split('/').pop() || '';
+          return p.photoNames.some((pName: string) => fileName.includes(pName) || pName.includes(fileName));
+        });
       }
     }
 
@@ -192,12 +251,12 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
     } else if (contentFilter === "videos") {
       items = items.filter(m => m.type === "video");
     } else if (contentFilter === "most-liked") {
-      items = [...items].sort((a, b) => (b.likes || 0) - (a.likes || 0));
+      items = [...items].sort((a, b) => (likesMap[b.id] ?? b.likes ?? 0) - (likesMap[a.id] ?? a.likes ?? 0));
     }
     return items;
-  };
+  }, [mediaItems, currentGroupTab, selectedPersonId, faceProfiles, searchGuest, contentFilter, likesMap]);
 
-  const displayedItems = getDisplayedItems();
+  const getDisplayedItems = () => displayedItems;
 
   const navigateLightbox = (direction: number) => {
     setSelectedIdx(prev => {
@@ -238,7 +297,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
   };
 
   return (
-    <div dir="rtl" className="min-h-[100dvh] corkboard-wall text-white flex flex-col font-sans relative" id="live_album_viewport">
+    <div dir="rtl" className={`min-h-[100dvh] ${getThemeSkinClass()} text-white flex flex-col font-sans relative transition-colors duration-500`} id="live_album_viewport">
       
       {/* Ambient background orbs & wall vignette */}
       <div className="orb orb-rose" aria-hidden="true" />
@@ -246,110 +305,204 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
       <div className="wall-vignette" aria-hidden="true" />
 
       {/* ── HEADER ── */}
-      <header className="sticky top-0 z-30 glass-card border-b border-white/10 px-4 py-3 flex items-center justify-between shrink-0">
+      <header className="sticky top-0 z-30 glass-card border-b border-white/10 px-4 py-3 flex flex-wrap items-center justify-between shrink-0 gap-3">
         <div className="flex items-center gap-3">
           <button type="button"
             onClick={onBackToHome}
-            className="p-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-white transition-all cursor-pointer border border-white/10"
+            className="p-2 bg-white/5 hover:bg-white/15 rounded-xl text-white transition-all cursor-pointer border border-white/10 shadow-sm"
           >
             <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
           </button>
           <div>
-            <h1 className="text-sm font-semibold text-white leading-tight">آلبوم زنده</h1>
-            <p className="text-[10px] text-slate-400 truncate max-w-[140px] mt-0.5">{eventName || eventId}</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-bold text-white leading-tight">آلبوم زنده خاطرات</h1>
+              <span className="text-[10px] bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full border border-rose-500/30 font-mono font-bold">
+                {mediaItems.length} فایل
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400 truncate max-w-[180px] mt-0.5">{eventName || eventId}</p>
           </div>
         </div>
-        <div className="flex items-center gap-2 font-sans">
+
+        {/* View Mode & Theme Switchers */}
+        <div className="flex items-center gap-2 font-sans flex-wrap">
+          {/* Theme Skin Picker */}
+          <div className="flex items-center bg-black/30 p-1 rounded-xl border border-white/10 gap-1">
+            <button
+              type="button"
+              onClick={() => setThemeSkin("velvet")}
+              title="تم مخملی"
+              className={`px-2.5 py-1 text-[11px] rounded-lg transition-all flex items-center gap-1 ${themeSkin === "velvet" ? "bg-rose-500/30 text-rose-200 border border-rose-400/40 font-bold" : "text-slate-400 hover:text-white"}`}
+            >
+              <span>🍷</span>
+              <span className="hidden sm:inline">مخملی</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setThemeSkin("golden")}
+              title="تم طلایی"
+              className={`px-2.5 py-1 text-[11px] rounded-lg transition-all flex items-center gap-1 ${themeSkin === "golden" ? "bg-amber-500/30 text-amber-200 border border-amber-400/40 font-bold" : "text-slate-400 hover:text-white"}`}
+            >
+              <span>✨</span>
+              <span className="hidden sm:inline">طلایی</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setThemeSkin("emerald")}
+              title="تم زمردی"
+              className={`px-2.5 py-1 text-[11px] rounded-lg transition-all flex items-center gap-1 ${themeSkin === "emerald" ? "bg-teal-500/30 text-teal-200 border border-teal-400/40 font-bold" : "text-slate-400 hover:text-white"}`}
+            >
+              <span>🌿</span>
+              <span className="hidden sm:inline">زمردی</span>
+            </button>
+          </div>
+
+          {/* View Mode Switcher */}
+          <div className="flex items-center bg-black/30 p-1 rounded-xl border border-white/10 gap-1">
+            <button
+              type="button"
+              onClick={() => setViewMode("scatter")}
+              title="دیوار خاطرات"
+              className={`p-1.5 rounded-lg transition-all flex items-center gap-1.5 text-xs ${viewMode === "scatter" ? "bg-white/20 text-white font-bold shadow-md" : "text-slate-400 hover:text-white"}`}
+            >
+              <LayoutGrid className="w-4 h-4" />
+              <span className="hidden md:inline text-[11px]">پولاروید</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              title="شبکه مدرن"
+              className={`p-1.5 rounded-lg transition-all flex items-center gap-1.5 text-xs ${viewMode === "grid" ? "bg-white/20 text-white font-bold shadow-md" : "text-slate-400 hover:text-white"}`}
+            >
+              <Grid className="w-4 h-4" />
+              <span className="hidden md:inline text-[11px]">مدرن</span>
+            </button>
+          </div>
+
+          {/* Selection & Actions */}
           {selectMode ? (
-            <>
+            <div className="flex items-center gap-1.5">
               <button type="button"
                 onClick={selectAllVisible}
-                className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-300 transition-all cursor-pointer border border-white/10 flex items-center gap-1.5"
+                className="text-[11px] px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-slate-200 transition-all cursor-pointer border border-white/10 flex items-center gap-1.5"
               >
                 <CheckSquare className="w-3.5 h-3.5 text-emerald-400" />
-                انتخاب همه
+                همه
               </button>
               {selectedIds.size > 0 && (
                 <button type="button"
                   onClick={deselectAll}
-                  className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-300 transition-all cursor-pointer border border-white/10"
+                  className="text-[11px] px-2.5 py-1.5 bg-white/5 hover:bg-white/15 rounded-xl text-slate-300 transition-all cursor-pointer border border-white/10"
                 >
-                  لغو انتخاب
+                  لغو
                 </button>
               )}
               <button type="button"
                 onClick={handleDownloadSelected}
                 disabled={selectedIds.size === 0}
-                className="text-[11px] px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 border border-emerald-500/30 text-white rounded-lg transition-all cursor-pointer disabled:opacity-40 disabled:cursor-default flex items-center gap-1.5 font-bold shadow-lg"
+                className="text-[11px] px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 border border-emerald-500/30 text-white rounded-xl transition-all cursor-pointer disabled:opacity-40 flex items-center gap-1.5 font-bold shadow-lg"
               >
                 <Download className="w-3.5 h-3.5" />
-                دانلود ({selectedIds.size})
+                ({selectedIds.size})
               </button>
               <button type="button"
                 onClick={() => { setSelectedIds(new Set()); setSelectMode(false); }}
-                className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-slate-300 cursor-pointer transition-all"
+                className="p-1.5 bg-white/10 hover:bg-white/20 rounded-xl text-slate-300 cursor-pointer transition-all"
               >
                 <X className="w-4 h-4" />
               </button>
-            </>
+            </div>
           ) : (
-            <>
+            <div className="flex items-center gap-1.5">
               <button type="button"
                 onClick={() => setSelectMode(true)}
-                className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-300 transition-all cursor-pointer border border-white/10 flex items-center gap-1.5"
+                className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-xl text-slate-300 transition-all cursor-pointer border border-white/10 flex items-center gap-1.5"
               >
                 <CheckSquare className="w-3.5 h-3.5" />
                 انتخاب
               </button>
               <button type="button"
                 onClick={handleDownloadAll}
-                className="text-[11px] px-3 py-1.5 bg-white/5 hover:bg-white/15 rounded-lg text-slate-300 transition-all cursor-pointer border border-white/10 flex items-center gap-1.5"
+                className="text-[11px] px-3 py-1.5 shimmer-gold rounded-xl transition-all cursor-pointer shadow-md flex items-center gap-1.5"
                 title="دانلود همه عکس‌ها"
               >
-                <DownloadCloud className="w-3.5 h-3.5" />
-                همه
+                <DownloadCloud className="w-3.5 h-3.5 text-slate-900" />
+                دانلود همگی
               </button>
-            </>
+            </div>
           )}
         </div>
       </header>
 
-      {/* ── FILTERS ── */}
-      <div className="z-20 shrink-0 bg-[#2a1c22]/80 backdrop-blur-md">
-        <div className="px-4 py-2 flex gap-1.5 overflow-x-auto scrollbar-none border-b border-white/10">
-          <button type="button"
-            onClick={() => { setCurrentGroupTab("all"); setFilterTab("all"); }}
-            className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
-              currentGroupTab === "all"
-                ? "bg-rose-500/20 border-rose-500/40 text-rose-300 font-bold"
-                : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
-            }`}
-          >
-            همه موارد ({mediaItems.length})
-          </button>
-          <button type="button"
-            onClick={() => { setCurrentGroupTab("filter"); setFilterTab("all"); }}
-            className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
-              currentGroupTab === "filter"
-                ? "bg-amber-500/20 border-amber-500/40 text-amber-300 font-bold"
-                : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
-            }`}
-          >
-            <Filter className="w-3 h-3" />
-            دسته‌بندی
-          </button>
+      {/* ── TABS & CONTENT FILTER ── */}
+      <div className="z-20 shrink-0 bg-black/40 backdrop-blur-md border-b border-white/10">
+        <div className="px-4 py-2 flex items-center justify-between gap-3 overflow-x-auto scrollbar-none">
+          <div className="flex items-center gap-1.5">
+            <button type="button"
+              onClick={() => setCurrentGroupTab("all")}
+              className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border ${
+                currentGroupTab === "all"
+                  ? "bg-rose-500/25 border-rose-500/50 text-rose-300 font-bold shadow-sm"
+                  : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
+              }`}
+            >
+              همه ({mediaItems.length})
+            </button>
 
-          <button type="button"
-            onClick={() => { setCurrentGroupTab("faces"); }}
-            className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
-              currentGroupTab === "faces"
-                ? "bg-teal-500/20 border-teal-500/40 text-teal-300 font-bold shadow-sm"
-                : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
-            }`}
-          >
-            <Sparkles className="w-3 h-3 text-teal-400" />
-            افراد و چهره‌ها ({faceProfiles.length})
-          </button>
+            <button type="button"
+              onClick={() => { setCurrentGroupTab("faces"); }}
+              className={`text-[11px] px-3 py-1.5 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1.5 ${
+                currentGroupTab === "faces"
+                  ? "bg-teal-500/25 border-teal-500/50 text-teal-300 font-bold shadow-sm"
+                  : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
+              }`}
+            >
+              <Sparkles className="w-3 h-3 text-teal-400" />
+              چهره‌ها ({faceProfiles.length})
+            </button>
+          </div>
+
+          {/* Search Bar */}
+          <div className="relative flex items-center shrink-0">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute right-2.5" />
+            <input
+              type="text"
+              placeholder="جستجوی مهمان..."
+              value={searchGuest}
+              onChange={(e) => setSearchGuest(e.target.value)}
+              aria-label="جستجوی مهمان"
+              className="text-[11px] bg-white/10 border border-white/15 rounded-full pr-8 pl-3 py-1 text-white placeholder-slate-400 outline-none w-[140px] sm:w-[170px] focus:border-amber-400/60 focus:ring-1 focus:ring-amber-400/40 transition-all"
+            />
+          </div>
+        </div>
+
+        {/* Content type chips — always visible now that the film-filter panel is gone */}
+        <div className="px-4 pb-2 flex gap-1.5 overflow-x-auto scrollbar-none items-center" role="group" aria-label="نوع رسانه">
+          {([
+            { id: "all", label: "همه رسانه‌ها", Icon: null, accent: "rose" },
+            { id: "photos", label: "عکس‌ها", Icon: Image, accent: "rose" },
+            { id: "videos", label: "ویدیوها", Icon: Video, accent: "rose" },
+            { id: "most-liked", label: "محبوب‌ترین‌ها", Icon: Heart, accent: "amber" },
+          ] as const).map(({ id, label, Icon, accent }) => {
+            const active = contentFilter === id;
+            const activeCls = accent === "amber"
+              ? "bg-amber-500/30 border-amber-500/50 text-amber-200 font-bold"
+              : "bg-rose-500/30 border-rose-500/50 text-rose-200 font-bold";
+            return (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setContentFilter(id as FilterType)}
+                className={`text-[10px] px-3 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border shrink-0 flex items-center gap-1 ${
+                  active ? activeCls : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
+                }`}
+              >
+                {Icon && <Icon className={`w-3 h-3 ${id === "most-liked" ? "text-rose-400 fill-rose-400" : ""}`} />}
+                {label}
+              </button>
+            );
+          })}
         </div>
 
         <AnimatePresence>
@@ -358,12 +511,12 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
-              className="px-4 py-3 border-b border-white/10 space-y-2.5 overflow-hidden bg-black/20"
+              className="px-4 py-3 border-t border-white/10 space-y-2.5 overflow-hidden bg-black/30"
             >
               <div className="flex items-center gap-1.5">
                 <Users className="w-3.5 h-3.5 text-teal-400 shrink-0" />
                 <span className="text-[11px] font-bold text-slate-300">
-                  پروفایل‌های شناسایی‌شده چهره
+                  فیلتر بر اساس مهمانان شناسایی‌شده
                 </span>
               </div>
 
@@ -373,7 +526,7 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                   onClick={() => setSelectedPersonId(null)}
                   className={`flex flex-col items-center gap-1 shrink-0 p-1.5 rounded-xl border transition-all cursor-pointer ${
                     selectedPersonId === null
-                      ? "bg-teal-500/20 border-teal-400 text-white font-bold"
+                      ? "bg-teal-500/25 border-teal-400 text-white font-bold"
                       : "bg-white/5 border-white/10 text-slate-400 hover:text-white"
                   }`}
                 >
@@ -395,11 +548,10 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                         onClick={() => setSelectedPersonId(isSelected ? null : p.personId)}
                         className={`flex flex-col items-center gap-1 shrink-0 p-1.5 rounded-xl border transition-all cursor-pointer relative ${
                           isSelected
-                            ? "bg-teal-500/25 border-teal-400 shadow-md ring-2 ring-teal-400/40"
+                            ? "bg-teal-500/30 border-teal-400 shadow-md ring-2 ring-teal-400/40"
                             : "bg-white/5 border-white/10 hover:border-white/25"
                         }`}
                       >
-                        {/* ── face avatar — no photo count badge ── */}
                         <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white/20 bg-slate-900 shadow-md flex items-center justify-center">
                           {p.avatarUrl ? (
                             <img 
@@ -423,127 +575,69 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               </div>
             </motion.div>
           )}
-
-          {currentGroupTab === "filter" && (
-            <motion.div 
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              className="px-4 py-2 space-y-2 border-b border-white/10 overflow-hidden"
-            >
-              <div className="flex gap-1.5 overflow-x-auto scrollbar-none items-center">
-                <div className="relative flex items-center shrink-0">
-                  <Search className="w-3 h-3 text-slate-400 absolute right-2" />
-                  <input
-                    type="text"
-                    placeholder="جستجوی مهمان..."
-                    value={searchGuest}
-                    onChange={(e) => setSearchGuest(e.target.value)}
-                    className="text-[10px] bg-white/5 border border-white/10 rounded-full px-6 py-1.5 text-white placeholder-slate-500 outline-none w-[130px] focus:border-rose-500/40 focus:ring-1 focus:ring-rose-500/30"
-                  />
-                </div>
-                <div className="w-px h-4 bg-white/20 shrink-0 mx-1" />
-                <button type="button" onClick={() => setContentFilter("all")} className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border shrink-0 ${contentFilter === "all" ? "bg-rose-500/20 border-rose-500/40 text-rose-300" : "bg-white/5 border-white/10 text-slate-400"}`}>همه نوع</button>
-                <button type="button" onClick={() => setContentFilter("photos")} className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${contentFilter === "photos" ? "bg-rose-500/20 border-rose-500/40 text-rose-300" : "bg-white/5 border-white/10 text-slate-400"}`}>
-                  <Image className="w-2.5 h-2.5" /> عکس
-                </button>
-                <button type="button" onClick={() => setContentFilter("videos")} className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${contentFilter === "videos" ? "bg-rose-500/20 border-rose-500/40 text-rose-300" : "bg-white/5 border-white/10 text-slate-400"}`}>
-                  <Video className="w-2.5 h-2.5" /> ویدیو
-                </button>
-                <button type="button" onClick={() => setContentFilter("most-liked")} className={`text-[10px] px-2.5 py-1 rounded-full whitespace-nowrap transition-all cursor-pointer border flex items-center gap-1 shrink-0 ${contentFilter === "most-liked" ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-white/5 border-white/10 text-slate-400"}`}>
-                  <Heart className="w-2.5 h-2.5" /> محبوب‌ها
-                </button>
-              </div>
-
-              {allFilters.length > 0 && (
-                <div className="flex gap-1.5 overflow-x-auto scrollbar-none pt-1">
-                  <span className="text-[9px] text-slate-500 flex items-center mr-1 shrink-0">فیلتر:</span>
-                  <button type="button" onClick={() => setFilterTab("all")} className={`text-[9px] px-2 py-0.5 rounded-full shrink-0 border ${filterTab === "all" ? "bg-white/20 border-white/30 text-white" : "bg-transparent border-white/10 text-slate-400"}`}>همه</button>
-                  {allFilters.map(f => (
-                    <button type="button" key={f} onClick={() => setFilterTab(f)} className={`text-[9px] px-2 py-0.5 rounded-full shrink-0 border flex items-center gap-1 ${filterTab === f ? "bg-white/20 border-white/30 text-white" : "bg-transparent border-white/10 text-slate-400"}`}>
-                      {FILM_FILTERS.find(ff => ff.id === f)?.emoji} {FILM_FILTERS.find(ff => ff.id === f)?.name || f}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          )}
         </AnimatePresence>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-6 pb-14 z-10">
+      {/* ── MAIN MEDIA DISPLAY ── */}
+      <div className="flex-1 overflow-y-auto px-4 py-6 pb-16 z-10">
         {loading ? (
-          <div className="flex items-center justify-center py-32">
-            <Loader className="w-8 h-8 text-rose-400 animate-spin stroke-1" />
+          <div className="flex flex-col items-center justify-center py-36 gap-3">
+            <Loader className="w-10 h-10 text-amber-400 animate-spin stroke-1" />
+            <p className="text-xs text-slate-400 font-bold">در حال بارگذاری خاطرات آلبوم...</p>
           </div>
         ) : displayedItems.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-32 text-slate-500">
-            <Image className="w-12 h-12 mb-3 opacity-30 stroke-1" />
-            <p className="text-sm font-semibold">موردی یافت نشد</p>
+          <div className="flex flex-col items-center justify-center py-32 text-slate-400 gap-2">
+            <Image className="w-14 h-14 opacity-25 stroke-1" />
+            <p className="text-base font-bold text-slate-300">موردی برای نمایش یافت نشد</p>
+            <p className="text-xs text-slate-500">فیلترهای جستجو را تغییر دهید یا فایل جدید آپلود کنید.</p>
           </div>
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-5 gap-y-16 pt-6 px-2">
+        ) : viewMode === "scatter" ? (
+          /* 📌 SCATTER POLAROID WALL MODE */
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-16 pt-6 px-2">
             {displayedItems.map((m, idx) => {
-              const filterDef = FILM_FILTERS.find(f => f.id === m.filter);
               const isSelected = selectedIds.has(m.id);
+              const likesCount = likesMap[m.id] ?? m.likes ?? 0;
 
-              // If item has no filter or 'none', auto-assign from aesthetic pool for visual variety
-              const AESTHETIC_FILTERS = ["wedding", "old", "polaroid", "kodak", "west", "vhs", "cinematic", "portrait", "noir"];
-              const effectiveFilter = (filterDef && filterDef.id !== "none")
-                ? filterDef.cssStyle
-                : (FILM_FILTERS.find(f => f.id === AESTHETIC_FILTERS[idx % AESTHETIC_FILTERS.length])?.cssStyle ?? "none");
-              const filterStyle = effectiveFilter === "none" ? undefined : effectiveFilter;
-
-              // Use a predictable but varied rotation pattern (12 variants)
               const rotClass = selectMode ? "" : `polaroid-rot-${(idx % 12) + 1}`;
-
-              // Stagger vertical offset per column position for corkboard scatter feel
-              // col position within a 2-col row on mobile, 3-col on tablet, 4-col on desktop
               const colOffsets = ["mt-0", "mt-8", "mt-4", "mt-12"];
               const colOffset = selectMode ? "" : colOffsets[idx % 4];
 
-              // Canva moodboard tape & paperclip variants: Yellow, Grid, Pink, Green, Paperclip
-              const tapeClasses = [
-                "polaroid-tape-yellow",
-                "polaroid-tape-grid",
-                "polaroid-tape-pink",
-                "polaroid-tape-green"
-              ];
-              const showPaperclip = idx % 5 === 2;
-              const showTape = !showPaperclip && idx % 3 !== 2;
+              // Varied accents: Yellow, Grid, Pink, Sage Green, Gold Foil, Paperclip, Pushpin, Wax Seal
+              const showGoldTape = idx % 7 === 1;
+              const showPaperclip = idx % 6 === 2;
+              const showWaxSeal = idx % 8 === 4;
+              const showTape = !showGoldTape && !showPaperclip && !showWaxSeal && idx % 3 !== 2;
+              const tapeClasses = ["polaroid-tape-yellow", "polaroid-tape-grid", "polaroid-tape-pink", "polaroid-tape-green"];
               const tapeVariant = tapeClasses[idx % 4];
-              const showPushpin = !showTape && !showPaperclip;
+              const showPushpin = !showTape && !showGoldTape && !showPaperclip && !showWaxSeal;
               const pushpinClass = idx % 2 === 0 ? "polaroid-pushpin-red" : "polaroid-pushpin-brass";
 
-              const showPostmark = idx % 4 === 1;
+              const showPostmark = idx % 5 === 1;
               const showCornerMounts = idx % 6 === 3;
 
               return (
                 <motion.div
                   key={m.id}
                   layout
-                  initial={{ opacity: 0, y: 30, scale: 0.88, rotate: idx % 2 === 0 ? -8 : 8 }}
+                  initial={{ opacity: 0, y: 30, scale: 0.88, rotate: idx % 2 === 0 ? -6 : 6 }}
                   animate={{ opacity: 1, y: 0, scale: 1, rotate: 0 }}
-                  transition={{ duration: 0.45, delay: Math.min(idx * 0.04, 0.6), ease: [0.22, 1, 0.36, 1] }}
-                  className={`polaroid-mini cursor-pointer group ${rotClass} ${colOffset} ${isSelected ? "ring-2 ring-emerald-400 ring-offset-2 ring-offset-[#2a1c22]" : ""}`}
+                  transition={{ duration: 0.45, delay: Math.min(idx * 0.03, 0.5), ease: [0.22, 1, 0.36, 1] }}
+                  className={`polaroid-mini cursor-pointer group ${rotClass} ${colOffset} ${isSelected ? "ring-4 ring-emerald-400 ring-offset-4 ring-offset-[#2a1c22]" : ""}`}
                   onClick={() => {
                     if (selectMode) toggleSelect(m.id);
                     else setSelectedIdx(idx);
                   }}
-                  whileHover={{ y: -12, scale: 1.06, rotate: 0, zIndex: 35, transition: { duration: 0.28, ease: "easeOut" } }}
+                  whileHover={{ y: -14, scale: 1.07, rotate: 0, zIndex: 35, transition: { duration: 0.25 } }}
                 >
-                  {/* Washi tape accent */}
+                  {/* Accents */}
                   {showTape && !selectMode && <div className={tapeVariant} aria-hidden="true" />}
-                  
-                  {/* Pushpin accent */}
+                  {showGoldTape && !selectMode && <div className="polaroid-tape-gold" aria-hidden="true" />}
                   {showPushpin && !selectMode && <div className={pushpinClass} aria-hidden="true" />}
-
-                  {/* Metallic Paperclip accent */}
                   {showPaperclip && !selectMode && <div className="scrapbook-paperclip" aria-hidden="true" />}
+                  {showWaxSeal && !selectMode && <div className="polaroid-wax-seal" aria-hidden="true">★</div>}
 
                   {/* Photo area */}
                   <div className="relative overflow-hidden select-none" style={{ aspectRatio: "1/1" }}>
-                    {/* Vintage Corner Photo Mounts */}
                     {showCornerMounts && (
                       <>
                         <div className="scrapbook-corner-mount scrapbook-corner-tl" />
@@ -553,99 +647,158 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
                       </>
                     )}
 
-                    {/* Vintage Postmark Stamp Seal */}
                     {showPostmark && !selectMode && <div className="scrapbook-postmark" aria-hidden="true" />}
 
                     {m.type === "video" ? (
                       <div className="w-full h-full relative bg-slate-900">
-                        <video src={m.url} className="w-full h-full object-cover" style={{ filter: filterStyle }} playsInline preload="metadata" />
-                        {/* Video badge */}
-                        <span className="absolute top-1.5 right-1.5 bg-black/70 backdrop-blur-md text-[9px] py-0.5 px-2 rounded-full flex items-center gap-1 text-white font-mono border border-white/10 shadow-md z-10">
+                        <video src={m.url} className="w-full h-full object-cover" playsInline preload="metadata" />
+                        <span className="absolute top-1.5 right-1.5 bg-black/75 backdrop-blur-md text-[9px] py-0.5 px-2 rounded-full flex items-center gap-1 text-white font-mono border border-white/15 shadow-md z-10">
                           <Video className="w-2.5 h-2.5 text-rose-400" />
-                          {m.duration ? `${m.duration}s` : ""}
+                          {m.duration ? `${m.duration}s` : "ویدیو"}
                         </span>
-                        {/* Slight sepia overlay to age it */}
-                        <div className="absolute inset-0 bg-amber-900/8 mix-blend-multiply pointer-events-none" />
                       </div>
                     ) : (
                       <div className="w-full h-full relative bg-slate-800">
                         <img
                           src={m.thumbnailUrl || m.url}
                           alt={m.guestName}
-                          className="w-full h-full object-cover transition-transform duration-600"
-                          style={{ filter: filterStyle }}
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                           loading="lazy"
+                          decoding="async"
                           onError={(e) => {
                             const t = e.currentTarget;
                             if (!t.src.includes('/api/thumbnail/')) t.src = `/api/thumbnail/${eventId}/${m.id}`;
                           }}
                         />
-                        {/* Aged photo vignette */}
                         <div className="absolute inset-0 bg-radial-gradient pointer-events-none" style={{
-                          background: "radial-gradient(ellipse at center, transparent 55%, rgba(30,15,5,0.28) 100%)"
+                          background: "radial-gradient(ellipse at center, transparent 55%, rgba(30,15,5,0.25) 100%)"
                         }} />
-                        {/* Subtle sepia/warm tone overlay */}
-                        <div className="absolute inset-0 bg-amber-950/10 mix-blend-multiply pointer-events-none" />
                       </div>
                     )}
 
-                    {/* Select mode overlay */}
+                    {/* Floating Heart Pop */}
+                    <AnimatePresence>
+                      {popHeartId === m.id && (
+                        <motion.div
+                          initial={{ opacity: 1, scale: 0.5, y: 0 }}
+                          animate={{ opacity: 0, scale: 2.2, y: -40 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.8 }}
+                          className="absolute inset-0 flex items-center justify-center pointer-events-none z-30"
+                        >
+                          <Heart className="w-14 h-14 text-rose-500 fill-rose-500 drop-shadow-lg" />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+
+                    {/* Select Overlay */}
                     {selectMode && (
-                      <div className="absolute inset-0 bg-black/30 backdrop-blur-[1px] flex items-center justify-center z-10">
+                      <div className="absolute inset-0 bg-black/35 backdrop-blur-[1px] flex items-center justify-center z-10">
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-all shadow-lg ${isSelected ? "bg-emerald-500 border-emerald-400 scale-110" : "bg-black/50 border-white/60"}`}>
                           <CheckSquare className={`w-4 h-4 ${isSelected ? "text-white" : "text-transparent"}`} />
                         </div>
                       </div>
                     )}
 
-                    {/* Hover download button */}
+                    {/* Download hover button */}
                     {!selectMode && (
                       <div className="absolute top-1.5 left-1.5 flex gap-1 opacity-0 group-hover:opacity-100 transition-all duration-200 z-10">
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleDownload(m.url, `${eventId}-${m.id}.${getExt(m)}`); }}
-                          className="bg-black/65 hover:bg-rose-500 backdrop-blur-md p-1.5 rounded-full text-white transition-all cursor-pointer border border-white/20 shadow-md"
+                          className="bg-black/70 hover:bg-rose-500 backdrop-blur-md p-1.5 rounded-full text-white transition-all cursor-pointer border border-white/20 shadow-md"
                           title="دانلود"
                         >
                           <Download className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     )}
-
-                    {/* Film filter badge */}
-                    {filterDef && filterDef.id !== 'none' && (
-                      <span className="absolute bottom-1.5 left-1.5 bg-black/65 backdrop-blur-md text-white/90 text-[8px] px-1.5 py-0.5 rounded font-mono tracking-wide border border-white/10 flex items-center gap-1 shadow-md z-10">
-                        <span>{filterDef.emoji}</span>
-                        <span>{filterDef.name}</span>
-                      </span>
-                    )}
                   </div>
 
-                  {/* Bottom caption — sits in the ::before pseudo-tab via absolute positioning */}
+                  {/* Caption & Like Bar */}
                   <div
                     className="relative flex items-center justify-between px-2 z-10"
                     style={{ height: "38px" }}
                     onClick={e => e.stopPropagation()}
                   >
-                    <span className="font-cursive text-[#3a2a1a] text-lg font-bold line-clamp-1 leading-snug pt-0.5 tracking-wide">
-                      {m.guestName}
+                    <span className="font-cursive text-[#2d1e14] text-lg font-bold line-clamp-1 leading-snug tracking-wide">
+                      {m.guestName || "مهمان عزیز"}
                     </span>
-                    {m.likes > 0 && (
-                      <span className="text-[10px] text-rose-700 font-mono font-extrabold flex items-center gap-0.5 shrink-0">
-                        <Heart className="w-2.5 h-2.5 fill-rose-600 text-rose-600" />
-                        {m.likes}
-                      </span>
-                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => handleToggleLike(m.id, e)}
+                      className="flex items-center gap-1 text-[11px] font-mono font-extrabold text-rose-800 hover:text-rose-600 transition-colors cursor-pointer bg-white/40 hover:bg-white/70 px-2 py-0.5 rounded-full border border-amber-900/10"
+                    >
+                      <Heart className={`w-3 h-3 ${likesCount > 0 ? "fill-rose-600 text-rose-600" : "text-rose-700"}`} />
+                      <span>{likesCount}</span>
+                    </button>
                   </div>
                 </motion.div>
               );
             })}
           </div>
+        ) : (
+          /* ✨ MODERN LUXURY GLASS GRID MODE */
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 pt-2">
+            {displayedItems.map((m, idx) => {
+              const isSelected = selectedIds.has(m.id);
+              const likesCount = likesMap[m.id] ?? m.likes ?? 0;
 
+              return (
+                <motion.div
+                  key={m.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ duration: 0.3, delay: Math.min(idx * 0.02, 0.4) }}
+                  whileHover={{ y: -6, scale: 1.02 }}
+                  className={`group relative glass-card rounded-2xl overflow-hidden border border-white/15 cursor-pointer shadow-xl ${isSelected ? "ring-4 ring-emerald-400" : ""}`}
+                  onClick={() => {
+                    if (selectMode) toggleSelect(m.id);
+                    else setSelectedIdx(idx);
+                  }}
+                >
+                  <div className="relative aspect-square overflow-hidden bg-slate-900">
+                    {m.type === "video" ? (
+                      <video src={m.url} className="w-full h-full object-cover" playsInline preload="metadata" />
+                    ) : (
+                      <img
+                        src={m.thumbnailUrl || m.url}
+                        alt={m.guestName}
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        loading="lazy"
+                        decoding="async"
+                        onError={(e) => {
+                          const t = e.currentTarget;
+                          if (!t.src.includes('/api/thumbnail/')) t.src = `/api/thumbnail/${eventId}/${m.id}`;
+                        }}
+                      />
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-80 group-hover:opacity-95 transition-opacity" />
+
+                    {/* Guest name badge & Likes */}
+                    <div className="absolute bottom-2.5 right-2.5 left-2.5 flex items-center justify-between z-10">
+                      <span className="text-xs font-bold text-white truncate max-w-[70%]">
+                        {m.guestName}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleLike(m.id, e)}
+                        className="flex items-center gap-1 text-[10px] bg-black/60 hover:bg-rose-500/80 backdrop-blur-md px-2 py-0.5 rounded-full text-white transition-all border border-white/10 font-bold"
+                      >
+                        <Heart className={`w-3 h-3 ${likesCount > 0 ? "fill-rose-400 text-rose-400" : "text-white"}`} />
+                        <span>{likesCount}</span>
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
         )}
       </div>
 
-      {/* ── LIGHTBOX ── */}
+      {/* ── LIGHTBOX MODAL ── */}
       <AnimatePresence>
         {selectedIdx !== null && displayedItems[selectedIdx] && (
           <motion.div
@@ -653,64 +806,79 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-[#0f0a0d]/95 backdrop-blur-2xl flex flex-col"
+            className="fixed inset-0 z-50 bg-black/95 backdrop-blur-2xl flex flex-col"
             onClick={() => setSelectedIdx(null)}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 bg-black/40" onClick={e => e.stopPropagation()}>
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setSelectedIdx(null)}
-                  className="p-1.5 bg-white/10 hover:bg-white/20 border border-white/10 rounded-lg text-white transition-all cursor-pointer"
+                  className="p-2 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-white transition-all cursor-pointer"
                 >
                   <X className="w-5 h-5" />
                 </button>
                 <div className="flex flex-col">
-                  <span className="text-sm font-semibold text-white">{displayedItems[selectedIdx]?.guestName}</span>
-                  <span className="text-[10px] text-slate-400 font-sans mt-0.5">
-                    {FILM_FILTERS.find(f => f.id === displayedItems[selectedIdx]?.filter)?.name}
+                  <span className="text-sm font-bold text-white">{displayedItems[selectedIdx]?.guestName}</span>
+                  <span className="text-[11px] text-slate-400 font-sans mt-0.5">
+                    {displayedItems[selectedIdx]?.timestamp
+                      ? new Date(displayedItems[selectedIdx].timestamp).toLocaleString("fa-IR", {
+                          dateStyle: "medium", timeStyle: "short",
+                        })
+                      : ""}
                   </span>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => handleDownload(displayedItems[selectedIdx]?.url, `${eventId}-${displayedItems[selectedIdx]?.id}.${getExt(displayedItems[selectedIdx])}`)}
-                className="btn-gradient px-4 py-1.5 rounded-xl text-white transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold"
-              >
-                <Download className="w-4 h-4" />
-                دانلود
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={(e) => handleToggleLike(displayedItems[selectedIdx]?.id, e)}
+                  className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/40 border border-rose-500/30 text-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all"
+                  aria-label="پسندیدن"
+                >
+                  <Heart className="w-4 h-4 fill-rose-500 text-rose-500" />
+                  <span>{likesMap[displayedItems[selectedIdx]?.id] ?? displayedItems[selectedIdx]?.likes ?? 0}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownload(displayedItems[selectedIdx]?.url, `${eventId}-${displayedItems[selectedIdx]?.id}.${getExt(displayedItems[selectedIdx])}`)}
+                  className="shimmer-gold px-4 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 text-xs shadow-lg"
+                >
+                  <Download className="w-4 h-4" />
+                  دانلود
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 flex items-center justify-center relative" onClick={e => e.stopPropagation()}>
+            <div className="flex-1 flex items-center justify-center relative p-4" onClick={e => e.stopPropagation()}>
               {displayedItems.length > 1 && (
                 <button type="button"
                   onClick={() => navigateLightbox(-1)}
-                  className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white transition-all cursor-pointer border border-white/20"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 z-20 p-3 bg-black/60 hover:bg-black/80 rounded-full text-white transition-all cursor-pointer border border-white/20 shadow-xl"
                 >
-                  <ArrowLeft className="w-5 h-5 rtl:-rotate-180" />
+                  <ArrowLeft className="w-6 h-6 rtl:-rotate-180" />
                 </button>
               )}
               <motion.div 
                 key={selectedIdx}
-                initial={{ opacity: 0, scale: 0.95 }}
+                initial={{ opacity: 0, scale: 0.94 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.2 }}
-                className="w-full h-full flex items-center justify-center p-4"
+                transition={{ duration: 0.25 }}
+                className="w-full h-full flex items-center justify-center"
               >
                 {displayedItems[selectedIdx]?.type === "video" ? (
                   <video
                     src={displayedItems[selectedIdx]?.url}
-                    className="max-w-full max-h-[80vh] rounded-2xl object-contain shadow-2xl"
+                    className="max-w-full max-h-[82vh] rounded-2xl object-contain shadow-2xl border border-white/10"
                     controls autoPlay playsInline
                   />
                 ) : (
                   <img
                     src={displayedItems[selectedIdx]?.url}
                     alt=""
-                    className="max-w-full max-h-[80vh] rounded-2xl object-contain shadow-2xl"
+                    className="max-w-full max-h-[82vh] rounded-2xl object-contain shadow-2xl border border-white/10"
                     draggable={false}
                   />
                 )}
@@ -718,15 +886,15 @@ export default function LiveAlbum({ eventId, onBackToHome }: LiveAlbumProps) {
               {displayedItems.length > 1 && (
                 <button type="button"
                   onClick={() => navigateLightbox(1)}
-                  className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-2 bg-black/50 hover:bg-black/70 rounded-full text-white transition-all cursor-pointer border border-white/20"
+                  className="absolute left-4 top-1/2 -translate-y-1/2 z-20 p-3 bg-black/60 hover:bg-black/80 rounded-full text-white transition-all cursor-pointer border border-white/20 shadow-xl"
                 >
-                  <ArrowLeft className="w-5 h-5 rtl:rotate-180" />
+                  <ArrowLeft className="w-6 h-6 rtl:rotate-180" />
                 </button>
               )}
             </div>
 
-            <div className="text-center py-4 border-t border-white/10 font-sans">
-              <span className="bg-white/10 border border-white/10 text-white/90 text-xs py-1.5 px-4 rounded-full">
+            <div className="text-center py-3 border-t border-white/10 font-sans bg-black/40">
+              <span className="bg-white/10 border border-white/15 text-white/90 text-xs py-1.5 px-4 rounded-full font-mono font-bold">
                 {selectedIdx + 1} از {displayedItems.length}
               </span>
             </div>

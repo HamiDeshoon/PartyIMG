@@ -1,4 +1,5 @@
 import fs from "fs";
+import fsp from "fs/promises";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
@@ -13,6 +14,30 @@ export interface StorageProvider {
   deleteEventData(eventId: string): Promise<void>;
 }
 
+/** Strips path separators / traversal from a caller-supplied name segment. */
+function sanitizeSegment(value: string): string {
+  return String(value || "")
+    .replace(/[\\/]/g, "-")
+    .replace(/\.\./g, "-")
+    .replace(/[\u0000-\u001f<>:"|?*]/g, "")
+    .slice(0, 80);
+}
+
+/**
+ * Moves a file, falling back to copy+delete when source and destination live on
+ * different volumes (rename() raises EXDEV, e.g. project on C: but the event
+ * saveDirectory on D:\Wedding or an external SSD).
+ */
+async function moveFile(from: string, to: string): Promise<void> {
+  try {
+    await fsp.rename(from, to);
+  } catch (err: any) {
+    if (err?.code !== "EXDEV" && err?.code !== "EPERM") throw err;
+    await fsp.copyFile(from, to);
+    await fsp.unlink(from).catch(() => {});
+  }
+}
+
 export class LocalStorageProvider implements StorageProvider {
   private baseDir: string;
 
@@ -21,51 +46,46 @@ export class LocalStorageProvider implements StorageProvider {
   }
 
   async init() {
-    if (!fs.existsSync(this.baseDir)) {
-      fs.mkdirSync(this.baseDir, { recursive: true });
-    }
+    await fsp.mkdir(this.baseDir, { recursive: true });
   }
 
   async saveFile(file: any, eventId: string, type: string, originalName: string, buffer?: Buffer, saveDir?: string): Promise<{ url: string, systemSavePath: string }> {
     const typeFolder = type === 'video' ? 'videos' : 'photos';
     const effectiveBase = saveDir ? path.resolve(saveDir) : this.baseDir;
-    const folder = path.join(effectiveBase, eventId, typeFolder);
-    if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
+    const folder = path.join(effectiveBase, sanitizeSegment(eventId), typeFolder);
+    await fsp.mkdir(folder, { recursive: true });
 
-    const ext = path.extname(originalName) || '';
+    const ext = path.extname(sanitizeSegment(originalName)) || '';
     const filename = `media-${Date.now()}-${uuidv4()}${ext}`;
     const destinationPath = path.join(folder, filename);
 
     if (buffer) {
-       fs.writeFileSync(destinationPath, buffer);
+      await fsp.writeFile(destinationPath, buffer);
     } else if (file && file.path) {
-       fs.renameSync(file.path, destinationPath);
+      await moveFile(file.path, destinationPath);
     } else {
-       throw new Error("No buffer or file path provided to LocalStorageProvider");
+      throw new Error("No buffer or file path provided to LocalStorageProvider");
     }
 
-    const publicUrl = `/uploads/${eventId}/${typeFolder}/${filename}`;
+    const publicUrl = `/uploads/${encodeURIComponent(eventId)}/${typeFolder}/${filename}`;
     return { url: publicUrl, systemSavePath: destinationPath };
   }
 
   async deleteFile(url: string, systemSavePath: string, eventId: string, type: string): Promise<void> {
-    if (fs.existsSync(systemSavePath)) {
-      fs.unlinkSync(systemSavePath);
-    }
+    if (!systemSavePath) return;
+    await fsp.unlink(systemSavePath).catch(() => {});
   }
 
   getFileStream(systemSavePath: string) {
-    if (fs.existsSync(systemSavePath)) {
-        return fs.createReadStream(systemSavePath);
+    if (systemSavePath && fs.existsSync(systemSavePath)) {
+      return fs.createReadStream(systemSavePath);
     }
     return null;
   }
 
   async deleteEventData(eventId: string): Promise<void> {
-    const eventDir = path.join(this.baseDir, eventId);
-    if (fs.existsSync(eventDir)) {
-      fs.rmSync(eventDir, { recursive: true, force: true });
-    }
+    const eventDir = path.join(this.baseDir, sanitizeSegment(eventId));
+    await fsp.rm(eventDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
