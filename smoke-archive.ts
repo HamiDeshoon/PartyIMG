@@ -8,7 +8,7 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 import * as db from "./db.js";
-import { ARCHIVE_ROOT, archivePathFor, noteUploadActivity, runArchivePass, idleState } from "./archive.js";
+import { ARCHIVE_ROOT, ARCHIVE_ALWAYS_TRANSFER, archivePathFor, noteUploadActivity, runArchivePass, idleState } from "./archive.js";
 
 const PRIMARY = process.env.SMOKE_PRIMARY!;
 const EVENT_ID = "smoke-event";
@@ -51,15 +51,23 @@ async function main() {
   ok("archivePathFor rejects paths outside the primary root",
     archivePathFor("C:\\Windows\\notepad.exe", PRIMARY) === null);
 
-  // Idle gate: a fresh upload must block the worker.
-  noteUploadActivity();
-  const blocked = await runArchivePass(async () => PRIMARY);
-  ok(`idle gate holds the pass off (${blocked.reason})`, blocked.moved === 0 && !idleState().idle);
-  ok("file is still on the local tier", fs.existsSync(sourcePath));
+  if (ARCHIVE_ALWAYS_TRANSFER) {
+    // In continuous mode the idle gate is bypassed — noteUploadActivity does NOT block a pass.
+    console.log("PASS  idle gate (continuous mode — gate bypassed by design)");
+    // A normal pass moves immediately without force.
+    const immediate = await runArchivePass(async () => PRIMARY);
+    ok(`continuous pass moved the file immediately (moved=${immediate.moved} skipped=${immediate.skipped})`, immediate.moved === 1);
+  } else {
+    // Idle gate: a fresh upload must block the worker.
+    noteUploadActivity();
+    const blocked = await runArchivePass(async () => PRIMARY);
+    ok(`idle gate holds the pass off (${blocked.reason})`, blocked.moved === 0 && !idleState().idle);
+    ok("file is still on the local tier", fs.existsSync(sourcePath));
 
-  // Forced pass = the admin "archive now" button.
-  const forced = await runArchivePass(async () => PRIMARY, { force: true });
-  ok(`forced pass moved the file (moved=${forced.moved} skipped=${forced.skipped})`, forced.moved === 1);
+    // Forced pass = the admin "archive now" button.
+    const forced = await runArchivePass(async () => PRIMARY, { force: true });
+    ok(`forced pass moved the file (moved=${forced.moved} skipped=${forced.skipped})`, forced.moved === 1);
+  }
   ok("original removed from local tier", !fs.existsSync(sourcePath));
   ok("copy exists on archive tier", fs.existsSync(expected!));
   ok("no .part staging file left behind", !fs.existsSync(`${expected}.part`));

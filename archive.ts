@@ -39,16 +39,19 @@ export const ARCHIVE_ROOT = (process.env.ARCHIVE_DIR || "F:\\Wedding").trim();
 /** Master switch — set ARCHIVE_ENABLED=false to keep everything local. */
 export const ARCHIVE_ENABLED = process.env.ARCHIVE_ENABLED !== "false" && ARCHIVE_ROOT.length > 0;
 
-/** How often to look for work. */
-const SCAN_INTERVAL_MS = envInt("ARCHIVE_SCAN_INTERVAL_MS", 2 * 60 * 1000);
+/** Always-on transfer mode — bypasses idle wait so files are moved anytime immediately. */
+export const ARCHIVE_ALWAYS_TRANSFER = (process.env.ARCHIVE_ALWAYS_TRANSFER || "").trim() !== "false";
 
-/** Nothing may have been uploaded in this window before a move is allowed. */
-const QUIET_PERIOD_MS = envInt("ARCHIVE_QUIET_MS", 90 * 1000);
+/** How often to look for work (3s default in continuous mode). */
+const SCAN_INTERVAL_MS = envInt("ARCHIVE_SCAN_INTERVAL_MS", 3 * 1000);
 
-/** A row must be at least this old — long enough for a background transcode to finish. */
-const MIN_AGE_MS = envInt("ARCHIVE_MIN_AGE_MS", 5 * 60 * 1000);
+/** Nothing may have been uploaded in this window before a move is allowed (0s in continuous mode). */
+const QUIET_PERIOD_MS = envInt("ARCHIVE_QUIET_MS", ARCHIVE_ALWAYS_TRANSFER ? 0 : 30 * 1000);
 
-/** Rows moved per pass. Small batches keep each pass interruptible. */
+/** A row must be at least this old (0s in continuous mode). */
+const MIN_AGE_MS = envInt("ARCHIVE_MIN_AGE_MS", ARCHIVE_ALWAYS_TRANSFER ? 0 : 60 * 1000);
+
+/** Rows moved per pass batch. Small batches keep each pass interruptible. */
 const BATCH_SIZE = envInt("ARCHIVE_BATCH_SIZE", 20);
 
 /** Refuse to fill the archive drive completely. */
@@ -60,9 +63,16 @@ const MAX_CPU_BUSY_PERCENT = envInt("ARCHIVE_MAX_CPU_PERCENT", 55);
 /* ─────────────────────────  ACTIVITY TRACKING  ───────────────────────── */
 
 let lastUploadAt = 0;
-/** Called by the upload route so the worker knows guests are actively sending. */
+let activePrimaryResolver: (() => Promise<string | undefined>) | null = null;
+
+/** Called by the upload route so the worker knows guests are actively sending and can move files immediately. */
 export function noteUploadActivity(): void {
   lastUploadAt = Date.now();
+  if (ARCHIVE_ALWAYS_TRANSFER && activePrimaryResolver && !running) {
+    setImmediate(() => {
+      void runArchivePass(activePrimaryResolver!).catch(() => {});
+    });
+  }
 }
 
 /** Supplied by server.ts: true while any ffmpeg/sharp job is queued or running. */
@@ -105,13 +115,15 @@ export async function isArchiveDriveMounted(): Promise<boolean> {
   if (!ARCHIVE_ENABLED) return false;
   const driveRoot = path.parse(path.resolve(ARCHIVE_ROOT)).root;
   try {
-    // Check the volume first: a missing drive letter must not create a folder.
-    await fsp.access(driveRoot, fs.constants.W_OK);
+    // Check volume existence (F_OK): on Windows root drive letters like F:\ or C:\
+    // fail W_OK permission checks without admin rights even when subfolders are writable.
+    await fsp.access(driveRoot, fs.constants.F_OK);
   } catch {
     return false;
   }
   try {
     await fsp.mkdir(ARCHIVE_ROOT, { recursive: true });
+    await fsp.access(ARCHIVE_ROOT, fs.constants.W_OK);
     return true;
   } catch (err: any) {
     logger.warn(`Archive root ${ARCHIVE_ROOT} is not writable: ${err?.message || err}`);
@@ -187,6 +199,10 @@ export function idleState(): ArchiveIdleState {
   const busy = cpuBusyPercent();
   const quietForMs = lastUploadAt === 0 ? Number.MAX_SAFE_INTEGER : Date.now() - lastUploadAt;
 
+  if (ARCHIVE_ALWAYS_TRANSFER) {
+    return { idle: true, reason: "continuous transfer active", cpuBusyPercent: busy, quietForMs };
+  }
+
   if (isMediaPipelineBusy()) {
     return { idle: false, reason: "media pipeline busy", cpuBusyPercent: busy, quietForMs };
   }
@@ -207,8 +223,8 @@ export function getArchiveStatusSummary(): string {
 }
 
 /**
- * Moves one batch of eligible originals to the archive drive.
- * `force` skips the idle check (used by the admin "archive now" button).
+ * Moves batches of eligible originals to the archive drive.
+ * `force` skips the idle check and minimum age check (used by the admin "archive now" button).
  * Returns how many files were relocated.
  */
 export async function runArchivePass(
@@ -218,14 +234,14 @@ export async function runArchivePass(
   if (!ARCHIVE_ENABLED) return { moved: 0, skipped: 0, reason: "archiving disabled" };
   if (running) return { moved: 0, skipped: 0, reason: "already running" };
 
-  if (!options.force) {
+  if (!options.force && !ARCHIVE_ALWAYS_TRANSFER) {
     const state = idleState();
     if (!state.idle) return { moved: 0, skipped: 0, reason: state.reason };
   }
 
   running = true;
-  let moved = 0;
-  let skipped = 0;
+  let totalMoved = 0;
+  let totalSkipped = 0;
 
   try {
     const primaryRoot = await primaryRootResolver();
@@ -239,62 +255,75 @@ export async function runArchivePass(
       return { moved: 0, skipped: 0, reason: lastRunSummary };
     }
 
-    const pending = await db.getPendingArchiveMedia(BATCH_SIZE);
-    if (!pending.length) {
-      lastRunSummary = "nothing pending";
-      return { moved: 0, skipped: 0 };
-    }
-
     let freeBytes = await freeBytesOn(ARCHIVE_ROOT);
 
-    for (const media of pending) {
-      // Re-check idleness between files so a guest uploading mid-pass wins.
-      if (!options.force && !idleState().idle) {
-        skipped++;
+    while (true) {
+      const pending = await db.getPendingArchiveMedia(BATCH_SIZE);
+      if (!pending.length) {
         break;
       }
 
-      const ageMs = Date.now() - new Date(media.timestamp || 0).getTime();
-      if (ageMs < MIN_AGE_MS) { skipped++; continue; }
+      let batchMoved = 0;
 
-      const source = media.systemSavePath;
-      if (!source || !fs.existsSync(source)) {
-        // The file is gone (deleted, or moved by hand). Mark it done so the
-        // queue doesn't retry it forever.
-        await db.markMediaArchived(media.id, source || "", source || "");
-        skipped++;
-        continue;
+      for (const media of pending) {
+        // Re-check idleness between files if not in continuous/always-transfer mode
+        if (!options.force && !ARCHIVE_ALWAYS_TRANSFER && !idleState().idle) {
+          totalSkipped++;
+          break;
+        }
+
+        if (!options.force && !ARCHIVE_ALWAYS_TRANSFER) {
+          const ageMs = Date.now() - new Date(media.timestamp || 0).getTime();
+          if (ageMs < MIN_AGE_MS) { totalSkipped++; continue; }
+        }
+
+        const source = media.systemSavePath;
+        if (!source || !fs.existsSync(source)) {
+          // The file is gone (deleted, or moved by hand). Mark it done so the
+          // queue doesn't retry it forever.
+          await db.markMediaArchived(media.id, source || "", source || "");
+          totalSkipped++;
+          continue;
+        }
+
+        const destination = archivePathFor(source, primaryRoot);
+        if (!destination) { totalSkipped++; continue; }
+
+        let size = 0;
+        try {
+          size = (await fsp.stat(source)).size;
+        } catch { totalSkipped++; continue; }
+
+        if (freeBytes - size < FREE_SPACE_MARGIN_BYTES) {
+          lastRunSummary = `archive drive low on space (${(freeBytes / 1024 ** 3).toFixed(1)} GB free)`;
+          logger.warn(lastRunSummary);
+          break;
+        }
+
+        try {
+          await relocate(source, destination);
+          await db.markMediaArchived(media.id, destination, source);
+          freeBytes -= size;
+          batchMoved++;
+          totalMoved++;
+        } catch (err: any) {
+          totalSkipped++;
+          logger.warn(`Archive move failed for media ${media.id}: ${err?.message || err}`);
+        }
       }
 
-      const destination = archivePathFor(source, primaryRoot);
-      if (!destination) { skipped++; continue; }
-
-      let size = 0;
-      try {
-        size = (await fsp.stat(source)).size;
-      } catch { skipped++; continue; }
-
-      if (freeBytes - size < FREE_SPACE_MARGIN_BYTES) {
-        lastRunSummary = `archive drive low on space (${(freeBytes / 1024 ** 3).toFixed(1)} GB free)`;
-        logger.warn(lastRunSummary);
+      if (batchMoved === 0) {
         break;
       }
-
-      try {
-        await relocate(source, destination);
-        await db.markMediaArchived(media.id, destination, source);
-        freeBytes -= size;
-        moved++;
-      } catch (err: any) {
-        skipped++;
-        logger.warn(`Archive move failed for media ${media.id}: ${err?.message || err}`);
+      if (!options.force && !ARCHIVE_ALWAYS_TRANSFER && !idleState().idle) {
+        break;
       }
     }
 
     const stillPending = await db.countPendingArchiveMedia();
-    lastRunSummary = `moved ${moved}, skipped ${skipped}, ${stillPending} still local`;
-    if (moved > 0) logger.info(`Archive pass: ${lastRunSummary} → ${ARCHIVE_ROOT}`);
-    return { moved, skipped };
+    lastRunSummary = `moved ${totalMoved}, skipped ${totalSkipped}, ${stillPending} still local`;
+    if (totalMoved > 0) logger.info(`Archive pass: ${lastRunSummary} → ${ARCHIVE_ROOT}`);
+    return { moved: totalMoved, skipped: totalSkipped };
   } finally {
     running = false;
   }
@@ -306,15 +335,24 @@ export function startArchiveWorker(primaryRootResolver: () => Promise<string | u
     logger.info("Tiered archive disabled (ARCHIVE_ENABLED=false or empty ARCHIVE_DIR).");
     return;
   }
+  activePrimaryResolver = primaryRootResolver;
   logger.info(
     `Tiered archive enabled → ${ARCHIVE_ROOT} ` +
-    `(scan ${Math.round(SCAN_INTERVAL_MS / 1000)}s, quiet ${Math.round(QUIET_PERIOD_MS / 1000)}s, ` +
+    `(mode: ${ARCHIVE_ALWAYS_TRANSFER ? "continuous/anytime" : "idle-only"}, ` +
+    `scan ${Math.round(SCAN_INTERVAL_MS / 1000)}s, quiet ${Math.round(QUIET_PERIOD_MS / 1000)}s, ` +
     `min age ${Math.round(MIN_AGE_MS / 1000)}s, batch ${BATCH_SIZE})`
   );
   cpuBusyPercent(); // Prime the delta so the first real sample is meaningful.
+
+  // Run initial pass on startup to clear any leftover queue
+  void runArchivePass(primaryRootResolver).catch(err =>
+    logger.warn(`Archive initial pass error: ${err?.message || err}`)
+  );
+
   setInterval(() => {
     void runArchivePass(primaryRootResolver).catch(err =>
       logger.warn(`Archive pass error: ${err?.message || err}`)
     );
   }, SCAN_INTERVAL_MS).unref();
 }
+

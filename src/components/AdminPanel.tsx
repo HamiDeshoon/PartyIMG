@@ -635,8 +635,9 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
               }
             } else if (msg.type === 'media:deleted' && msg.data.eventId === selectedEventId) {
               setMediaItems(prev => prev.filter(m => m.id !== msg.data.mediaId));
-            } else if (msg.type === 'face-index-complete') {
-              // Auto-refresh face profiles when background or manual indexing completes
+            } else if (msg.type === 'face-index-complete' || msg.type === 'archive_progress') {
+              // Auto-refresh face profiles or archive status when background indexing or archiving completes
+              if (msg.type === 'archive_progress') fetchArchiveStatus();
               fetch(`/api/events/${selectedEventId}/face-profiles`)
                 .then(r => r.json())
                 .then(data => setFaceProfiles(data.profiles || []))
@@ -745,6 +746,7 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
   const handleArchiveNow = async () => {
     if (!selectedEventId) return;
     setIsArchiving(true);
+    const progressPoll = setInterval(fetchArchiveStatus, 1500);
     try {
       const res = await fetch(`/api/events/${selectedEventId}/archive-now`, { method: "POST" });
       const data = await res.json();
@@ -755,7 +757,9 @@ export default function AdminPanel({ onBackToHome }: AdminPanelProps) {
     } catch (err: any) {
       toast.error(err?.message || "انتقال انجام نشد.");
     } finally {
+      clearInterval(progressPoll);
       setIsArchiving(false);
+      await fetchArchiveStatus();
     }
   };
 

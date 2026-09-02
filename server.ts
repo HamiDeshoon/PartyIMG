@@ -1494,6 +1494,9 @@ app.post("/api/events/:id/archive-now", requireAdmin, async (req: any, res: any,
     // `force` bypasses the idle gate: the admin asked for it explicitly, so the
     // usual "wait until nobody is uploading" politeness doesn't apply.
     const result = await runArchivePass(getPrimarySaveDirectory, { force: true });
+    if (result.moved > 0) {
+      broadcastEvent('archive_progress', { moved: result.moved });
+    }
     res.json({ ...result, lastPass: getArchiveStatusSummary() });
   } catch (err) { next(err); }
 });
